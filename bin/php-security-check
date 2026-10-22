@@ -7,7 +7,7 @@ export LC_ALL=C
 BASE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=../lib/common.sh
 source "$BASE/lib/common.sh"
-for module in detect advisories audit report services update; do
+for module in detect advisories audit report services repository update; do
     # shellcheck source=/dev/null
     source "$BASE/lib/$module.sh"
 done

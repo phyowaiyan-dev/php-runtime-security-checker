@@ -35,7 +35,7 @@ package/service scope ကို မချဲ့ပါ။ အပြင်ဘက�
 ပြည့်စုံပြီးသားစနစ်တွင် root၊ metadata refresh နှင့် restart မလိုဘဲ ပြီးဆုံးသည်။
 
 ```text
-PHP Runtime Security Checker  1.2.1
+PHP Runtime Security Checker  1.3.0
   Ubuntu 24.04.5 LTS  |  amd64
   ------------------------------------------------------------
   php8.4-cli                PASS    8.4.27-1+ubuntu24.04.1+deb.sury.org+1
@@ -159,3 +159,35 @@ verified same-branch candidate ရှိလျှင် guided repair ဖြင�
 အခြား release အတွက် build လုပ်ထားသော candidate ကို CVE fixed version
 ဖြစ်သော်လည်း မထည့်သွင်းပါ။ Build marker သည် origin သို့မဟုတ် vulnerability
 သက်သေ မဟုတ်ပါ။ Policy output မျှဝေရာတွင် credential/private URL များကို ဖျက်ပါ။
+
+## ရှိပြီးသား PHP Repository ကို အတည်ပြုပြီး Restore လုပ်ခြင်း
+
+လက်ရှိ single confirmation အတွင်း **ရှိပြီးသား** Ondrej PHP source ကို restore
+လုပ်ရန်လည်း ခွင့်ပြုနိုင်ပြီဖြစ်သည်။ Preview တွင် file၊ လက်ရှိ/ပြောင်းမည့် Ubuntu
+suite နှင့် existing signing-key path ကို ပြသည်။ မရှိသေးသော repository အသစ်၊ key
+အသစ်၊ pinning ပြောင်းခြင်းနှင့် PHP branch migration မလုပ်ပါ။
+
+`/etc/apt/sources.list.d` အတွင်း dedicated `.list` သို့မဟုတ် `.sources` file တစ်ခု၊
+`/etc/apt/keyrings` သို့မဟုတ် `/usr/share/keyrings` ရှိ file-based `Signed-By` key
+လိုအပ်သည်။ Comment ဖြင့်ပိတ်ထားသော legacy entry နှင့် `Enabled: no` ကို restore
+လုပ်နိုင်သည်။ Duplicate/multi-stanza file၊ embedded key၊ key မပါသော legacy
+source၊ symlink နှင့် trust bypass option များကို manual review လိုအပ်သည်။
+
+ခွင့်ပြုပြီးနောက် source hash နှင့် root ownership ကို ပြန်စစ်ကာ target suite ၏
+InRelease ကို ယာယီ directory သို့ download လုပ်သည်။ Existing key၊ publisher
+fingerprint၊ origin၊ codename နှင့် architecture ကို စစ်သည်။ Isolated APT cache
+တွင် fixed candidate များကို စစ်ပြီးမှ original source ဘေးတွင်
+`.php-security-checker.*.bak` backup ပြုလုပ်၍ atomic replacement လုပ်သည်။
+Architecture restriction နှင့် APT pinning ကို ထိန်းထားသည်။
+
+Host metadata refresh မအောင်မြင်လျှင် မူလ source ကို restore ပြန်လုပ်သည်။
+အောင်မြင်လျှင် PHP update နှင့် recheck ကို ဆက်လုပ်သည်။ နောက်ပိုင်း package
+operation မအောင်မြင်ပါက verified restored source နှင့် backup ကို ထိန်းထားပြီး
+package rollback အလိုအလျောက် မလုပ်ပါ။ `gpgv`၊ APT helper နှင့် existing binary
+`.gpg` keyring လိုအပ်သည်။ Test များတွင် real repository ပြောင်းလဲခြင်း မလုပ်ပါ။
+
+**Ubuntu 26.04:** 2026-10-22 တွင် publisher index ၌ `resolute` မရှိသေးဘဲ
+InRelease endpoint သည် HTTP 404 ပြန်ခဲ့သည်။ ထိုအခြေအနေတွင် source ကို မပြောင်းပါ။
+Publisher က signed metadata နှင့် compatible fixed package မပေးသေးလျှင် tool က
+ဖန်တီးပေး၍ မရပါ။ Runtime တွင် ပြန်စစ်သောကြောင့် အနာဂတ်တွင် ရှိလာပါက restore
+လုပ်နိုင်သည်။ [Verification source](data/REPOSITORY-SOURCES.md) ကို ကြည့်ပါ။

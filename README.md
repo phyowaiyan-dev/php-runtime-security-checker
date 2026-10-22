@@ -19,7 +19,7 @@ Use a trusted local checkout. No Composer, Python, Node.js or JSON/export setup.
 ## One command, one confirmation
 
 1. **Check.** Detect the OS and installed PHP runtimes; compare both CVEs with documented upstream/vendor fixes.
-2. **Review.** If a fix may be needed, show the installed core PHP packages in scope, their cached candidate plan when verifiable, and the active services to restart.
+2. **Review.** If a fix may be needed, show the installed core PHP packages in scope, their cached candidate plan when verifiable, any eligible existing PPA source restoration, and the active services to restart.
 3. **Choose.** Enter `1` / `yes` to authorize the whole scoped repair, or `0` / `no` / Enter to exit unchanged. Invalid input is asked again. Sudo may separately request your password.
 4. **Repair.** Refresh APT metadata, display the final verified version plan, simulate it, install only allowed updates, validate configuration and restart the affected active services.
 5. **Verify.** Check packages again and show the final result, including after a partial failure. No second confirmation is required.
@@ -27,7 +27,7 @@ Use a trusted local checkout. No Composer, Python, Node.js or JSON/export setup.
 The confirmation authorizes metadata refresh and verified updates **within the displayed package/service scope**. Final versions can differ from the cached preview after refresh. If the refreshed plan needs broader changes, it stops. A patched system exits immediately without root, metadata refresh or restarts.
 
 ```text
-PHP Runtime Security Checker  1.2.1
+PHP Runtime Security Checker  1.3.0
   Ubuntu 24.04.5 LTS  |  amd64
   ------------------------------------------------------------
   php8.4-cli                PASS    8.4.27-1+ubuntu24.04.1+deb.sury.org+1
@@ -156,3 +156,44 @@ through the guided flow; a candidate explicitly built for another release is
 refused, even if its upstream version contains the CVE fixes. Package build
 markers are compatibility evidence, never proof of origin or vulnerability.
 Redact credentials/private repository URLs before sharing policy output.
+
+## Verified restoration of an existing PHP repository
+
+The same confirmation can now authorize restoration of an **existing** Ondrej PHP
+source. The preview names its file, current/target Ubuntu suite and existing
+signing-key path. It does not add a previously absent repository, fetch new keys,
+change pinning or migrate PHP branches.
+
+Automatic restoration supports one dedicated `.list` or `.sources` file in
+`/etc/apt/sources.list.d`, with a file-based `Signed-By` key under
+`/etc/apt/keyrings` or `/usr/share/keyrings`. Commented legacy entries and
+`Enabled: no` deb822 entries are supported. Multiple definitions, multi-stanza
+files, embedded keys, keyless legacy sources, symlinks and trust-bypass options
+require manual review. Already-enabled sources for the correct suite are left alone.
+
+After consent, the private root helper:
+
+1. Rechecks the previewed source digest and secure root ownership of source/key paths.
+2. Downloads the publisher's target-suite InRelease into a temporary directory.
+3. Verifies its signature against the existing key and the publisher fingerprint,
+   and checks origin, codename and architecture.
+4. Uses isolated APT lists/cache with update hooks disabled to verify fixed runtime
+   candidates before changing the source. Global APT pins are retained.
+5. Creates an exact `.php-security-checker.*.bak` backup beside the source and
+   replaces the source atomically, preserving its architecture restriction.
+6. Refreshes host metadata. Failure restores the original source; success continues
+   the normal pinned PHP repair and re-audit. Later package failures retain the
+   verified restored source and its backup; packages are never automatically rolled back.
+
+`gpgv`, APT's `/usr/lib/apt/apt-helper`, and an already-present trusted binary `.gpg`
+keyring are required. Missing signatures, unsupported suites, unavailable fixed
+candidates or changed source files stop restoration. No test invokes this root
+helper against the development host; signature, rollback and workflow tests use
+fixtures/mocks. Live Ubuntu integration validation remains required before release.
+
+**Ubuntu 26.04 limitation:** on 2026-10-22 the publisher's distribution index did
+not list `resolute` and its InRelease endpoint returned HTTP 404. Repository repair
+cannot manufacture packages for an unpublished suite and leaves sources unchanged
+in this case. This is checked at runtime, not hardcoded: restoration can work if the
+publisher later provides correctly signed metadata and compatible fixed packages.
+See [repository verification sources](data/REPOSITORY-SOURCES.md).

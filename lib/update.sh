@@ -53,6 +53,7 @@ prepare_scope() {
     if ! transaction_policy_available; then
         block_reason='An existing policy-rc.d requires administrator-managed repair; it will not be replaced.'; return 1
     fi
+    discover_repository_repair
     approved_inventory=$inventory
 }
 check_holds() {
@@ -131,7 +132,12 @@ show_scope() {
     for row in "${scope_rows[@]}"; do IFS='|' read -r p v o <<< "$row"; message "$p  (installed $v)"; done
     message "Active services to restart: ${fix_services[*]:-none}"
     message 'Refresh APT metadata, then install only verified same-source PHP upgrades in this scope.'
-    message 'No removals, new packages, PHP branch changes or repository additions are allowed.'
+message 'No removals, new packages or PHP branch changes are allowed.'
+    if [[ -n $repo_file ]]; then
+        message "Repository repair: $repo_file ($repo_old_suite -> $repo_suite, enabled)."
+        message "Existing signing key: $repo_key. A backup is created before the atomic source replacement."
+        message 'The publisher signature, host release and fixed candidates must verify before any source edit.'
+    else message 'No repository change planned.'; fi
     message 'Unverified installed provenance can only be replaced with a verified Ubuntu/PPA candidate.'
     message 'Service restarts may briefly interrupt PHP requests. Inactive services stay stopped.'
 }
@@ -147,16 +153,24 @@ show_plan() {
 repair() {
     local pending
     if ! authorize_root; then action_error=1; workflow_note='Root authorization failed; no changes made.'; return; fi
-    message 'Refreshing package lists...'
+    if [[ -n $repo_file ]]; then
+        restore_repository || return 0
+    else
+        message 'Refreshing package lists...'
+    fi
     # Fail even on partial repository/network errors, rather than silently using stale indexes.
-    if ! run_root apt-get -o APT::Update::Error-Mode=any -o Acquire::AllowInsecureRepositories=false -o Acquire::AllowDowngradeToInsecureRepositories=false update >/dev/null 2>&1; then
+    if [[ -z $repo_file ]] && ! run_root apt-get -o APT::Update::Error-Mode=any -o Acquire::AllowInsecureRepositories=false -o Acquire::AllowDowngradeToInsecureRepositories=false update >/dev/null 2>&1; then
         action_error=1; workflow_note='APT refresh failed or root authorization was denied. No package update attempted; inspect repository/network access.'; return
     fi
     snapshot
     if [[ $inventory != "$approved_inventory" || $supported != 1 || $overall == ERROR ]]; then
         action_error=1; workflow_note='Installed package/platform state changed during planning. Repair stopped; run the command again.'; return
     fi
-    if [[ $overall == PASS ]]; then workflow_note='Packages already meet the verified baselines; no update needed.'; return; fi
+    if [[ $overall == PASS ]]; then
+        if [[ -n $repo_file ]]; then workflow_note="Repository restored for $repo_suite; packages meet the baselines. Backup retained beside $repo_file."
+        else workflow_note='Packages already meet the verified baselines; no update needed.'; fi
+        return
+    fi
     pending=$(dpkg --audit 2>/dev/null) || { action_error=1; workflow_note='Cannot inspect dpkg state.'; return; }
     if [[ -n $pending ]]; then action_error=1; workflow_note='dpkg has incomplete transactions. Repair them manually first.'; return; fi
     local holds
@@ -174,6 +188,8 @@ repair() {
     if ((${#fix_services[@]})); then restart_note="Restarted and active: ${fix_services[*]}"
     else restart_note='No active PHP-serving services needed a restart.'; fi
     workflow_note='Repair completed; installed packages were checked again.'
+    [[ -z $repo_file ]] || workflow_note+=" Repository restored for $repo_suite; backup retained beside $repo_file."
+    return 0
 }
 workflow() {
     snapshot

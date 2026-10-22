@@ -10,7 +10,7 @@ behavior. Never attach credentials, raw application data or full configurations.
 
 The guided command is read-only until a terminal user approves its displayed
 PHP repair scope. It can then refresh APT metadata, upgrade verified installed PHP
-core packages and restart affected active systemd services. Trust the local
+core packages and restart affected active systemd services. The same approval can\nalso restore a previewed existing dedicated Ondrej PHP source after signature,\nrelease and isolated candidate verification. It never installs a new signing key.\nSource backups are retained; refresh failure triggers source rollback. A later\npackage failure does not revert a successfully verified repository restoration. Trust the local
 checkout, advisory data, APT configuration, installed package database and OS.
 Root executes the checkout's private transaction script; use a trusted directory.
 

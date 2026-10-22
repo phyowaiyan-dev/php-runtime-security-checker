@@ -14,7 +14,7 @@ Development must not execute real package updates or service restarts.
 
 - Bash 5.3.20 syntax checks passed for every shell script.
 - ShellCheck 0.11.0 passed.
-- 31 mocked regression checks passed; no real APT refresh, upgrade, restart or reboot executed.
+- 43 mocked regression checks passed; no real APT refresh, upgrade, restart or reboot executed.
 - Ubuntu CI is configured but was not run in this macOS session.
 - Live Ubuntu 26.04/arm64 and maintainer-script behavior remain deployment validation tasks.
 
@@ -28,3 +28,16 @@ Development must not execute real package updates or service restarts.
 
 The server's repository/pinning cause cannot be established from the provided
 report alone; actual apt-cache policy output is needed. No server changes performed.
+
+## Authorized existing-repository repair (1.3.0)
+
+- [x] Implement bounded existing-source discovery and preview under the same confirmation.
+- [x] Verify publisher signature, release and compatible fixed candidates before source edits.
+- [x] Back up/atomically replace the source and roll back failed host metadata refreshes.
+- [x] Cover parsing, signatures, source rollback, unavailable suites and integrated confirmation with mocks.
+- [x] Update English/Burmese documentation and security policy.
+
+Current publisher resolute endpoint returned HTTP 404 during read-only verification.
+This authorization does not authorize PHP migration or allow publishing nonexistent packages.
+No real source changes, APT operations, service restarts or reboots ran in development.
+The private root helper still requires disposable Ubuntu integration validation.

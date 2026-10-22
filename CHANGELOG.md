@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0 — Unreleased
+
+- Allow consented restoration of one existing dedicated Ondrej PHP source in the guided workflow.
+- Verify existing keys, publisher signature, Ubuntu suite and fixed candidates in isolated APT state first.
+- Preview source changes, preserve architectures/pins, retain backups and roll back failed source refreshes.
+- Refuse missing suites, duplicate/complex sources, unsigned metadata and unverified candidates.
+- Add repository parser, signature, backup/rollback and single-confirmation workflow regressions.
+
 ## 1.2.1 — Unreleased
 
 - Show each installed runtime's CVE package result, including patched branches on mixed systems.

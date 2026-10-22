@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-VERSION=1.2.1
+VERSION=1.3.0
 scope='Two PHP CVEs only; Laravel dependencies, custom/container PHP and existing workers are outside this package check.'
 warnings=(); runtimes=(); results=(); origins=(); inventory=''
 overall=PASS; operation_error=0; supported=0

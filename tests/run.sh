@@ -3,7 +3,7 @@ set -euo pipefail
 BASE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=../lib/common.sh
 source "$BASE/lib/common.sh"
-for module in detect advisories audit report services update; do
+for module in detect advisories audit report services repository update; do
     # shellcheck source=/dev/null
     source "$BASE/lib/$module.sh"
 done
@@ -113,6 +113,7 @@ run_root() {
     case $1 in
         apt-get) [[ $MOCK_STATE_CHANGE == 0 ]] || MOCK_STATE=inactive; [[ $MOCK_REFRESH_FAIL == 0 ]];;
         bash)
+            if [[ $2 == "$BASE/lib/repository-transaction.sh" ]]; then return "$MOCK_REPO_CODE"; fi
             if [[ $MOCK_PARTIAL == 1 || $MOCK_INSTALL_FAIL == 0 ]]; then printf '%s\n' "$MOCK_CANDIDATE" > "$TMP/version"; fi
             [[ $MOCK_INSTALL_FAIL == 0 ]];;
         /usr/sbin/php-fpm*|apache2ctl) [[ $MOCK_CONFIG_FAIL == 0 ]];;
@@ -126,9 +127,15 @@ run_root() {
 # shellcheck disable=SC2329
 is_interactive() { [[ $MOCK_TTY == 1 ]]; }
 # shellcheck disable=SC2329
+repository_source_files() { [[ -z $MOCK_SOURCE ]] || printf '%s\n' "$MOCK_SOURCE"; return 0; }
+# shellcheck disable=SC2329
+repository_digest() {
+    if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | awk '{print $1}'
+}
+# shellcheck disable=SC2329
 transaction_policy_available() { [[ $MOCK_POLICY == 0 ]]; }
 reset() {
-    MOCK_RELEASE=24.04; MOCK_MIXED=0; MOCK_MODPHP=0; MOCK_BRANCH=8.4; MOCK_CANDIDATE=8.4.27-1+ubuntu24.04.1+deb.sury.org+1
+    MOCK_SOURCE=''; MOCK_REPO_CODE=0; MOCK_RELEASE=24.04; MOCK_MIXED=0; MOCK_MODPHP=0; MOCK_BRANCH=8.4; MOCK_CANDIDATE=8.4.27-1+ubuntu24.04.1+deb.sury.org+1
     MOCK_REPO=https://ppa.launchpadcontent.net/ondrej/php/ubuntu
     MOCK_STATE_CHANGE=0; MOCK_NEW_REPO=''; MOCK_OLD_ORIGIN=1; MOCK_HOLD=''; MOCK_UNSAFE=''; MOCK_ACTIVE=1; MOCK_STATE=active
     MOCK_AUTH_FAIL=0; MOCK_REFRESH_FAIL=0; MOCK_INSTALL_FAIL=0; MOCK_PARTIAL=0
@@ -311,6 +318,34 @@ reset; MOCK_RELEASE=26.04; MOCK_CANDIDATE=8.4.27-1+ubuntu26.04.1+deb.sury.org+1
 workflow < "$TMP/answer" > "$TMP/output"
 assert test "$overall" = PASS
 ok 'a verified same-branch candidate built for the host release can repair old foreign builds'
+reset
+cat > "$TMP/ondrej.sources" <<'SOURCE'
+Types: deb
+URIs: https://ppa.launchpadcontent.net/ondrej/php/ubuntu
+Suites: jammy
+Components: main
+Signed-By: /etc/apt/keyrings/ondrej.gpg
+Enabled: no
+SOURCE
+MOCK_SOURCE="$TMP/ondrej.sources"
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = PASS
+assert test "$(awk '/Choice \[0\]/ {n++} END {print n+0}' "$TMP/output")" = 1
+assert grep -q 'Repository repair:' "$TMP/output"
+assert grep -q '/repository-transaction.sh' "$TMP/calls"
+assert grep -q '/transaction.sh' "$TMP/calls"
+ok 'existing repository restoration is previewed and covered by the same single confirmation'
+reset; MOCK_SOURCE="$TMP/ondrej.sources"; MOCK_REPO_CODE=71
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = ERROR
+assert grep -q 'no retrievable signed PHP repository' "$TMP/output"
+if grep -q '/lib/transaction.sh' "$TMP/calls"; then exit 1; fi
+ok 'missing publisher suite (HTTP 404) prevents package installation and reports unchanged sources'
+reset; MOCK_SOURCE="$TMP/ondrej.sources"; printf '0\n' > "$TMP/answer"
+workflow < "$TMP/answer" > "$TMP/output"
+assert test ! -s "$TMP/calls"
+ok 'declining the combined repair never invokes repository modification'
 printf '\n%d checks passed; all privileged operations were mocked.\n' "$count"
 printf '\nSample patched-host report (fixture):\n'
 reset; printf '%s\n' "$MOCK_CANDIDATE" > "$TMP/version"; snapshot; report_human
+bash "$BASE/tests/repository.sh"
