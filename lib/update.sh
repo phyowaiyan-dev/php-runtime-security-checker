@@ -44,6 +44,7 @@ modify() {
     restart_services
     ((operation_error==0)) || return
     runtimes=(); origins=(); activities=(); packages=(); services=(); results=()
+    warnings=() # The final report describes the new snapshot, not superseded pre-fix findings.
     overall=PASS; service_status=PASS
     detect; audit
 }

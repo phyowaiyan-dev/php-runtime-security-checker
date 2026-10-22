@@ -11,6 +11,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y shellcheck ruby
-      - run: bash -n bin/php-security-check lib/*.sh tests/*.sh
-      - run: shellcheck -x bin/php-security-check lib/*.sh tests/*.sh
+      - run: for file in bin/php-security-check lib/*.sh tests/*.sh examples/*.sh; do bash -n "$file"; done
+      - run: shellcheck -x bin/php-security-check lib/*.sh tests/*.sh examples/*.sh
       - run: bash tests/run.sh

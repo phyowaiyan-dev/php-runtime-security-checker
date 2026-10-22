@@ -53,16 +53,6 @@ detect() {
     fi
     if [[ -e /.dockerenv ]] || systemctl is-active --quiet docker 2>/dev/null; then unknown 'Docker/container runtime detected; container PHP is outside scope.'; fi
     detect_reboot /var/run/reboot-required
-    for p in apache2 nginx; do
-        if systemctl is-active --quiet "$p" 2>/dev/null; then
-            warn "$p is active; virtual hosts, remote upstreams and custom handlers need manual inspection."
-            unknown 'Web handler coverage cannot be proven automatically.'
-        fi
-    done
-    # Inspect names/counts only; never print configuration contents.
-    local files
-    files=$(find /etc/apache2/mods-enabled /etc/nginx/sites-enabled /etc/php -type f -o -type l 2>/dev/null) || true
-    [[ -z $files ]] || warn 'Web/PHP configuration exists; confirm enabled handlers and FPM socket routing manually.'
 }
 remaining_updates() {
     local p policy candidate installed

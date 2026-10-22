@@ -1,87 +1,140 @@
 # PHP Runtime Security Checker
 
-Ubuntu server များရှိ PHP runtime package များကို စစ်ဆေးရန် Bash CLI ဖြစ်သည်။
-CVE-2026-109618 နှင့် CVE-2026-109619 ကိုသာ စစ်ဆေးပြီး server တစ်ခုလုံး
-လုံခြုံကြောင်း အာမခံခြင်း မပြုပါ။
+Ubuntu Server များတွင် PHP Runtime Security Vulnerability များကို စစ်ဆေးပြီး Security Patch ပြုလုပ်နိုင်သည့် Open-Source Bash CLI Tool ဖြစ်ပါတယ်။
 
-Bash 4.4+၊ Ubuntu 22.04 / 24.04 / 26.04၊ amd64 / arm64၊ APT၊ dpkg နှင့်
-systemd လိုအပ်သည်။ Composer၊ Node.js၊ Python မလိုအပ်ပါ။
+**စစ်ဆေးပေးနိုင်သော CVEs**
 
-## ထည့်သွင်းခြင်းနှင့် အသုံးပြုခြင်း
+- CVE-2026-109618
+- CVE-2026-109619
 
-```sh
-git clone https://github.com/USERNAME/php-runtime-security-checker.git
+**Supported:** Ubuntu 22.04 / 24.04 / 26.04, PHP 8.x, Bash 4.4+ (amd64 / arm64)
+
+## Installation
+
+```bash
+git clone https://github.com/phyowaiyan-dev/php-runtime-security-checker.git
 cd php-runtime-security-checker
+```
+
+## အသုံးပြုနည်း
+
+**1. PHP Security စစ်ဆေးရန်**
+
+```bash
 bash bin/php-security-check --check
-bash bin/php-security-check --json
-bash bin/php-security-check --output report.txt --no-color
+```
+
+**2. Security Updates ပြုလုပ်ရန်**
+
+```bash
 sudo bash bin/php-security-check --fix
+```
+
+**3. အတည်ပြုချက်မမေးဘဲ Update ပြုလုပ်ရန်**
+
+```bash
 sudo bash bin/php-security-check --fix --yes
+```
+
+**4. Apache / PHP-FPM Restart ပြုလုပ်ရန်**
+
+```bash
 sudo bash bin/php-security-check --restart
 ```
 
-USERNAME သည် နမူနာသာ ဖြစ်ပြီး အမှန်တကယ် repository ပိုင်ရှင်ဖြင့် အစားထိုးပါ။
-မူလ mode သည် ဖတ်ရှုစစ်ဆေးခြင်းသာ ဖြစ်သည်။ စစ်ဆေးရန် root မလိုပါ။
-ပြုပြင်ခြင်းတွင် အပြောင်းအလဲကို ကြိုပြပြီး အတည်ပြုချက်တောင်းသည်။ `--yes`
-သည် မေးခွန်းကိုသာ ကျော်ပြီး safety check များကို ဆက်လုပ်သည်။
-`--output` သည် ရှိပြီးသား file ကို မရေးထပ်ပါ။
+**5. JSON Report ထုတ်ရန်**
 
-## ရလဒ်များ
+```bash
+bash bin/php-security-check --json
+```
 
-- PASS / exit 0: သတ်မှတ်ထားသည့် package နှင့် CVE အထောက်အထား ပြည့်စုံသည်။
-- FAIL / exit 1: အတည်ပြုထားသည့် Ubuntu mapping အရ patch မပြည့်စုံပါ။
-- UNKNOWN / exit 2: package origin၊ backport သို့မဟုတ် restart အထောက်အထား မလုံလောက်ပါ။
-- ERROR / exit 3: command၊ package operation သို့မဟုတ် report ရေးခြင်း မအောင်မြင်ပါ။
+## Security Check ရလဒ်များ
 
-PHP upstream fixed version များမှာ 8.2.35၊ 8.3.36၊ 8.4.27၊ 8.5.12 ဖြစ်သည်။
-Ubuntu vendor backport ကို version နံပါတ်ဟောင်းဖြစ်ရုံဖြင့် vulnerable ဟု
-မသတ်မှတ်ပါ။ [အရင်းအမြစ်များ](data/SOURCES.md) ကို 2026-10-22 တွင်
-စစ်ဆေးထားသည်။ မသိသော backport နှင့် custom build များကို UNKNOWN ပြသည်။
-PHP 8.1 သည် upstream EOL ဖြစ်သော်လည်း Ubuntu 22.04 vendor fix ကို သိရှိသည်။
+| Status | အဓိပ္ပာယ် |
+| --- | --- |
+| ✅ PASS | စစ်ဆေးထားသော CVE များအတွက် Patch ပြည့်စုံသည် |
+| ❌ FAIL | Security Patch လိုအပ်သည် |
+| ⚠️ UNKNOWN | အချက်အလက်မလုံလောက်၍ ထပ်မံစစ်ဆေးရန်လိုသည် |
+| ❗ ERROR | စစ်ဆေးခြင်း သို့မဟုတ် Update ပြုလုပ်ခြင်း မအောင်မြင်ပါ |
+
+**သတိပြုရန်:** Production Server တွင် `--fix` အသုံးမပြုမီ Backup/Snapshot ပြုလုပ်ပါ။ PASS ဖြစ်ခြင်းသည် Server တစ်ခုလုံး လုံခြုံကြောင်း အာမခံခြင်းမဟုတ်ပါ။
+
+ပိုမိုအသေးစိတ်ကို [English README](README.md) နှင့် [Security Sources](data/SOURCES.md) တွင် ဖတ်ရှုနိုင်ပါတယ်။
+
+**License:** MIT
+
+## Services: UNKNOWN နှင့် Restart အထောက်အထား
+
+ယခင် code သည် လက်ရှိ command အတွင်း `restarted` flag ရှိမှသာ restart
+လုပ်ပြီးကြောင်း လက်ခံခဲ့သည်။ နောက်တစ်ကြိမ် audit လုပ်လျှင် flag ပျောက်သဖြင့်
+အပြင်မှ အောင်မြင်စွာ restart လုပ်ထားသော်လည်း UNKNOWN ပြနေခဲ့သည်။ Active
+Apache/Nginx ကို handler မစစ်ဘဲ UNKNOWN သတ်မှတ်ခြင်းနှင့် ပြုပြင်မတိုင်မီ
+warning များ ကျန်နေခြင်းကိုလည်း ပြင်ဆင်ထားသည်။
+
+ယခု report တွင် အောက်ပါ အထောက်အထားနှစ်မျိုးကို သီးခြားပြသည်။
+
+- **Restart freshness** — process များသည် package/config အပြောင်းအလဲပြီးမှ
+  စတင်ထားကြောင်း စစ်ဆေးခြင်း။
+- **Web handler coverage** — Apache ၏ enabled configuration နှင့် VirtualHost
+  override များရှိ PHP handler ကို စစ်ဆေးခြင်း။
+
+နှစ်ခုလုံး PASS ဖြစ်မှ `Services: PASS` ဖြစ်သည်။ CVE package နှစ်ခု PASS
+ဖြစ်သော်လည်း လိုအပ်သော အထောက်အထားမပြည့်စုံပါက `Overall: UNKNOWN` ဖြစ်မည်။
+Reboot status ကို သီးခြားပြသည်။ Active ဖြစ်ရုံ၊ restart command အောင်မြင်ရုံဖြင့်
+patched PHP ကို process က အသုံးပြုနေကြောင်း မသတ်မှတ်ပါ။
+
+Systemd MainPID၊ process စတင်ချိန် wall-clock/monotonic timestamp နှင့် kernel
+`/proc` process start time ကို တိုက်ဆိုင်စစ်ဆေးသည်။ Service ၏ cgroup v2 ထဲရှိ
+process အားလုံးသည် dpkg installation metadata၊ package file နှင့် configuration
+တို့၏ modification/change time ထက် နောက်ကျမှ စတင်ထားရမည်။ Symlink နှင့်
+configuration directory ပြောင်းလဲချိန်ကိုပါ စစ်သည်။ ဤအချိန်များသည် local
+filesystem အထောက်အထားဖြစ်ပြီး exact transaction log သို့မဟုတ် binary
+cryptographic အာမခံချက် မဟုတ်ပါ။ အချိန်တူနေခြင်း၊ clock မကိုက်ခြင်း၊ metadata
+မရှိခြင်း၊ worker များစစ်နေစဉ် ပြောင်းလဲခြင်းတို့တွင် UNKNOWN ပြမည်။
+
+အပြင်မှ restart လုပ်ထားသည်ကိုလည်း အထောက်အထားပြည့်စုံပါက လက်ခံသည်။ PHP-FPM
+executable ကို package နှင့် တိုက်ဆိုင်ပြီး Apache process များတွင် သက်ဆိုင်ရာ
+PHP module ကို load လုပ်ထားကြောင်း စစ်သည်။ Deleted shared library ကို လက်မခံပါ။
+OPcache ၏ anonymous `/dev/zero (deleted)` shared memory သည် code ဟောင်းကျန်နေခြင်း
+အထောက်အထား မဟုတ်သဖြင့် ၎င်းကြောင့်သာ UNKNOWN မဖြစ်ပါ။
+
+Apache enabled include tree နှင့် enabled VirtualHost အတွင်း `SetHandler`၊
+mod_php နှင့် standard local Unix-socket FPM mapping ကို စစ်သည်။ Socket အမည်သာ
+ကြည့်ခြင်းမဟုတ်ဘဲ audited FPM master က အမှန်တကယ် ဖွင့်ထားကြောင်း စစ်သည်။
+TCP/remote FPM၊ dynamic handler၊ rewrite proxy၊ `.htaccess` handler override၊
+custom launch/config၊ external FPM pool include၊ မဖတ်နိုင်သော configuration နှင့်
+Nginx upstream များကို manual review လိုအပ်သည်။ Apache configuration syntax
+အားလုံးကို နားလည်နိုင်သည့် parser မဟုတ်ပါ။
 
 ```text
-Advisory: php8.3-fpm|CVE-2026-109618|PASS
+Restart freshness: PASS
+Web handler coverage: UNKNOWN
 Services: UNKNOWN
-Reboot: REQUIRED
+Reboot: NO
 Overall: UNKNOWN
 ```
 
-Package ကို patch လုပ်ထားသော်လည်း worker များ restart ပြီးကြောင်း မသိပါက
-UNKNOWN ဖြစ်နိုင်သည်။ Reboot လိုအပ်ခြင်းကို သီးခြားပြသည်။
+ဤကဲ့သို့ restart အထောက်အထားပြည့်စုံပြီး handler မသေချာပါက FPM ကို ထပ် restart
+လုပ်ရန် warning မပေးတော့ပါ။ **Web handler coverage unverified** ဟုပြပြီး enabled
+VirtualHost နှင့် handler override ကို စစ်ရန် အကြံပြုသည်။ Restart အထောက်အထား
+မရပါက **restart freshness unverified** ဟုပြမည်။ Package metadata နှင့် `/proc`
+read permission ကို စစ်ပါ။ Root-owned process ကို ဖတ်ရန် လိုအပ်လျှင်
+`sudo bash bin/php-security-check --check` ဖြင့် read-only audit ပြန်လုပ်နိုင်သည်။
+၎င်းသည် package update သို့မဟုတ် restart မလုပ်ပါ။ Apache graceful reload သည်
+worker ဟောင်းကျန်နိုင်သောကြောင့် process အားလုံး fresh ဖြစ်ကြောင်း သက်သေမဟုတ်ပါ။
 
-## လုံခြုံစွာ ပြုပြင်ခြင်း
+JSON တွင် `services.status` အပြင် `services.freshness`၊
+`services.handler_coverage` နှင့် `services.evidence` ပါဝင်သည်။
+စမ်းသပ်ရန်:
 
-Backup နှင့် maintenance အချိန်ကို ပြင်ဆင်ပြီး APT metadata ကို သီးခြား
-`sudo apt-get update` ဖြင့် refresh လုပ်ပါ။ Tool သည် PHP branch မပြောင်း၊
-repository မထည့်၊ package မဖျက်၊ autoremove / full-upgrade / dist-upgrade
-မလုပ်၊ အလိုအလျောက် reboot မလုပ်ပါ။ Held package၊ အသစ်ထည့်ရမည့် dependency
-နှင့် မသက်ဆိုင်သော update များကို ပိတ်ပင်သည်။ APT မအောင်မြင်ပါက
-တစ်စိတ်တစ်ပိုင်း update ဖြစ်ပြီးသား ဖြစ်နိုင်သည်။
-
-Apache configuration ကို စစ်ဆေးပြီး လက်ရှိ active ဖြစ်သော FPM / Apache
-service ကို restart လုပ်သည်။ Inactive service ကို မစတင်ပါ။ ပြီးလျှင်
-ပြန်လည် audit လုပ်သည်။ ယာယီ `/usr/sbin/policy-rc.d` ဖြင့် package script
-restart ကို ထိန်းသည်။ ရှိပြီးသား policy ရှိလျှင် ရပ်သည်။ Power loss သို့မဟုတ်
-SIGKILL ဖြစ်လျှင် ယာယီ file ကို စီမံသူက စစ်ဆေးဖယ်ရှားရန် လိုနိုင်သည်။
-APT hook များသည် စီမံသူ၏ ထိန်းချုပ်မှုအောက်တွင် ဖြစ်သည်။
-
-Docker၊ custom PHP၊ remote FPM၊ queue worker၊ Octane နှင့် application
-package များသည် အပြည့်အဝ စစ်ဆေးနိုင်သည့် scope ပြင်ပဖြစ်သည်။ Active web
-server ရှိလျှင် routing အပြည့်အစုံ မသက်သေပြနိုင်သောကြောင့် UNKNOWN ပြသည်။
-CLI package ရှိခြင်းသည် application သုံးနေကြောင်း အထောက်အထား မဟုတ်ပါ။
-
-## စမ်းသပ်ခြင်းနှင့် YouTube demo
-
-```sh
-bash -n bin/php-security-check lib/*.sh tests/*.sh
-shellcheck -x bin/php-security-check lib/*.sh tests/*.sh
+```bash
+for file in bin/php-security-check lib/*.sh tests/*.sh examples/*.sh; do
+    bash -n "$file" || exit
+done
+shellcheck -x bin/php-security-check lib/*.sh tests/*.sh examples/*.sh
 bash tests/run.sh
 ```
 
-Test များတွင် privileged operation ကို mock သုံးသည်။ CI တွင် Ubuntu 22.04၊
-24.04 ကို သုံးသည်။ 26.04 နှင့် arm64 ကို deployment စမ်းသပ်မှု ထပ်လုပ်ရန်
-လိုအပ်သည်။ Ruby ကို JSON test အတွက်သာ သုံးပြီး runtime တွင် မလိုပါ။
-Video တွင် disposable VM၊ `--help`၊ mocked test၊ read-only report နှင့်
-UNKNOWN အဓိပ္ပာယ်ကို ပြပါ။ Secret၊ application data နှင့် production
-configuration ကို မပြပါနှင့်။ အသေးစိတ်ကန့်သတ်ချက်များကို English
-[README](README.md) တွင် ဖတ်နိုင်သည်။ MIT license ဖြစ်သည်။
+Test များသည် privileged operation မလုပ်ဘဲ mock နှင့် fixture ကို သုံးသည်။ Linux
+တွင် `/proc` start-time parser ကို unprivileged process ဖြင့် ထပ်စစ်သည်။ Live
+Ubuntu deployment စမ်းသပ်ခြင်းကို သီးခြားလုပ်ဆောင်ရန် လိုအပ်သည်။

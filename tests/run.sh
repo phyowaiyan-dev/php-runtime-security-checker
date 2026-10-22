@@ -4,7 +4,7 @@ BASE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 export BASE
 # shellcheck source=../lib/common.sh
 source "$BASE/lib/common.sh"
-for module in detect advisories audit update services report; do
+for module in detect advisories audit update handlers services report; do
     # shellcheck source=/dev/null
     source "$BASE/lib/$module.sh"
 done
@@ -42,10 +42,15 @@ assert test "$assessment" = UNKNOWN; ok 'unknown origin cannot pass'
 # Invoked through sourced service functions.
 # shellcheck disable=SC2329
 systemctl() { [[ ${MOCK_INACTIVE:-0} == 0 ]]; }
-services=(php8.3-fpm apache2); overall=PASS; restarted=0
+# Probe stubs isolate summary behavior; detailed evidence tests run in services.sh.
+# shellcheck disable=SC2329
+inspect_web_handlers() { return 0; }
+# shellcheck disable=SC2329
+verify_freshness() { freshness_reason='restart freshness unverified: fixture'; [[ ${MOCK_FRESH:-0} == 1 ]]; }
+services=(php8.3-fpm apache2); overall=PASS; MOCK_FRESH=0
 inspect_services
 assert test "$overall" = UNKNOWN; ok 'mixed serving runtimes require restart evidence'
-restarted=1; overall=PASS; service_status=PASS
+MOCK_FRESH=1; overall=PASS; service_status=PASS
 inspect_services
 assert test "$overall" = PASS; ok 'verified restart state'
 MOCK_INACTIVE=1; overall=PASS
@@ -109,11 +114,12 @@ restart_services() { restarted=1; }
 # shellcheck disable=SC2329
 detect() { runtimes=('php8.3-cli|8.3.6-0ubuntu0.24.04.13|CLI'); origins=(Ubuntu); activities=(installed); packages=(); services=(); }
 holds=''; PLAN='Inst php8.3-cli [8.3.6-0ubuntu0.24.04.12] (8.3.6-0ubuntu0.24.04.13 Ubuntu:24.04 [amd64])'
-packages=(php8.3-cli); operation_error=0; overall=FAIL; os_version=24.04
+warnings+=('superseded restart warning'); packages=(php8.3-cli); operation_error=0; overall=FAIL; os_version=24.04
 modify
 assert test "$operation_error" = 0
 assert test "$overall" = PASS
-ok 'mocked fix re-audits patched packages'
+assert test "${warnings[*]}" = "${warnings[*]//superseded restart warning/}"
+ok 'mocked fix re-audits patched packages and clears superseded warnings'
 packages=(php8.3-cli); operation_error=0; MOCK_APT_FAIL=1
 modify
 assert test "$operation_error" = 1
@@ -185,4 +191,6 @@ assert test "$reboot" = REQUIRED
 detect_reboot "$TMP/absent"
 assert test "$reboot" = NO
 ok 'reboot-required state is separate'
-printf '%d checks passed\n' "$count"
+printf '%d base checks passed\n' "$count"
+bash "$BASE/tests/services.sh"
+bash "$BASE/tests/evidence.sh"

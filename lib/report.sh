@@ -11,7 +11,7 @@ report_json() {
         printf ',"type":'; json_string "$kind"; printf ',"origin":'; json_string "${origins[i]}"
         printf ',"activity":'; json_string "${activities[i]}"; printf '}'; sep=,
     done
-printf '],"cves":['; sep=''
+    printf '],"cves":['; sep=''
     for entry in "${results[@]}"; do
         IFS='|' read -r p cve status <<< "$entry"
         printf '%s{"package":' "$sep"; json_string "$p"
@@ -19,7 +19,10 @@ printf '],"cves":['; sep=''
         printf '}'; sep=,
     done
     printf ']'
-    printf ',"services":{"names":'; json_array "${services[@]}"; printf ',"status":'; json_string "$service_status"; printf '}'
+    printf ',"services":{"names":'; json_array "${services[@]}"; printf ',"status":'; json_string "$service_status"
+    printf ',"freshness":'; json_string "$freshness_status"
+    printf ',"handler_coverage":'; json_string "$handler_status"
+    printf ',"evidence":'; json_array "${service_evidence[@]}"; printf '}'
     printf ',"reboot":'; json_string "$reboot"; printf ',"overall":'; json_string "$overall"
     printf ',"warnings":'; json_array "${warnings[@]}"; printf ',"limitations":'; json_array "${limitations[@]}"; printf '}\n'
 }
@@ -28,6 +31,7 @@ report_human() {
     printf 'PHP Runtime Security Checker v%s\nOS: %s\nArchitecture: %s\n' "$VERSION" "$os_name" "$arch"
     for r in "${runtimes[@]}"; do printf 'Runtime: %s\n' "$r"; done
     for r in "${results[@]}"; do printf 'Advisory: %s\n' "$r"; done
+    printf 'Restart freshness: %s\nWeb handler coverage: %s\n' "$freshness_status" "$handler_status"
     printf 'Services: %s\nReboot: %s\nOverall: %s\n' "$service_status" "$reboot" "$overall"
     for r in "${warnings[@]}"; do printf 'WARNING: %s\n' "$r"; done
     for r in "${limitations[@]}"; do printf 'Limitation: %s\n' "$r"; done
