@@ -1,147 +1,76 @@
 # PHP Runtime Security Checker
 
-An open-source Bash CLI tool to check PHP runtime security vulnerabilities and apply security patches on Ubuntu servers.
-
-**Supported CVEs:**
+A minimal, read-only check for two PHP runtime CVEs affecting PHP applications,
+including Laravel:
 
 - CVE-2026-109618
 - CVE-2026-109619
 
-**Requirements:** Ubuntu 22.04 / 24.04 / 26.04, supported PHP 8.x versions, Bash 4.4+ (amd64 / arm64).
-
-## Installation
-
-```bash
-git clone https://github.com/phyowaiyan-dev/php-runtime-security-checker.git
-cd php-runtime-security-checker
-```
+It checks **installed Ubuntu PHP packages**, not Laravel/Composer dependencies,
+application code, web-server configuration or running-worker freshness.
 
 ## Usage
 
-**1. Check PHP Security**
+Requires Bash 4.4+, dpkg and apt-cache on Ubuntu 22.04 / 24.04 / 26.04
+(amd64 / arm64). No root, Composer, Python, Node.js or network request is needed.
 
-```bash
+```sh
+git clone https://github.com/phyowaiyan-dev/php-runtime-security-checker.git
+cd php-runtime-security-checker
 bash bin/php-security-check --check
-```
-
-**2. Apply Security Updates**
-
-```bash
-sudo bash bin/php-security-check --fix
-```
-
-**3. Apply Updates Without Confirmation**
-
-```bash
-sudo bash bin/php-security-check --fix --yes
-```
-
-**4. Restart Apache / PHP-FPM**
-
-```bash
-sudo bash bin/php-security-check --restart
-```
-
-**5. Generate JSON Report**
-
-```bash
 bash bin/php-security-check --json
+bash bin/php-security-check --output report.txt
 ```
 
-## Security Check Results
+Default mode is `--check`. `--help`, `--version` and `--no-color` are supported.
+Reports use no terminal colors. Output files are private and existing files are
+never overwritten. JSON includes per-package versions, origins and CVE results.
 
-| Status | Description |
-| --- | --- |
-| ✅ PASS | Verified patches are installed for the checked CVEs |
-| ❌ FAIL | Required security patches are missing |
-| ⚠️ UNKNOWN | Insufficient information to verify patch status |
-| ❗ ERROR | Security check or update operation failed |
+## Example
 
-## Important Notes
-
-- Back up or snapshot your server before applying updates.
-- Security checks are read-only by default and do not require root access.
-- PHP security updates may require restarting Apache or PHP-FPM.
-- A **PASS** result does not guarantee that the entire server is secure.
-- This tool currently checks only the two listed PHP runtime CVEs.
-
-**License:** MIT
-
-## Service freshness and Apache handler coverage
-
-`Services: PASS` now requires both **Restart freshness: PASS** and **Web handler
-coverage: PASS**. A successful restart outside this tool can satisfy the check;
-there is no requirement to restart again through this CLI. Service activity
-alone never proves that patched PHP is loaded. CVE package results, service
-results and reboot state remain separate. Overall stays UNKNOWN if any required
-evidence is missing, even when both CVE package checks pass.
-
-The earlier implementation only trusted an in-memory `restarted` flag set during
-that invocation. Every new read-only audit lost that flag. It also marked every
-active Apache/Nginx deployment unknown without examining handlers and retained
-superseded warnings after remediation. Those paths have been replaced; the final
-post-remediation report uses fresh findings.
-
-Freshness checks use systemd MainPID, wall-clock and monotonic main-process start
-times, cross-checked against kernel `/proc` start times. Every process in the
-service's cgroup v2 subtree must be inspectable and newer than the local package
-and configuration change bounds. These bounds use dpkg installation `.list`
-metadata and package files' modification/change times, including symlink changes,
-rather than assuming that an upstream release-file timestamp is an install time.
-FPM configuration directories are included to catch removed pool configurations.
-Missing metadata, timestamp ties, inconsistent clocks, process churn or unsupported
-cgroup layouts remain UNKNOWN. These are trusted local filesystem bounds, not
-cryptographic attestation or an exact historical package transaction log.
-
-The checker verifies packaged executable identity, rejects deleted code mappings,
-and checks Apache's mapped PHP modules. Anonymous OPcache shared memory marked
-`/dev/zero (deleted)` does not itself imply stale PHP code. Custom service launch
-paths, PHP ini environment overrides and external FPM pool includes require manual
-review. Package metadata and process membership are checked again after inspection
-to avoid accepting an obviously changing snapshot.
-
-For Apache it examines the enabled include tree (`apache2ctl -t -D DUMP_INCLUDES`)
-and configured modules, including directives inside enabled VirtualHosts. Standard
-mod_php handlers must map to an installed, audited PHP module and its loaded
-process mappings. Standard `SetHandler "proxy:unix:/run/php/...sock|fcgi://localhost/"`
-handlers must resolve to a socket actually held by an audited local FPM master;
-the filename alone is insufficient. Apache must also postdate its inspected
-configuration and include directories. This is a conservative supported subset,
-not a complete Apache configuration interpreter.
-
-TCP/remote FPM, dynamic handlers, rewrite proxy/handler overrides, `.htaccess`
-handler permissions, custom module paths, directory-style/dynamic includes,
-unreadable configs and Nginx upstreams remain unverified. They produce a **Web
-handler coverage unverified** warning, not a request to repeat an already verified
-FPM restart. Inspect the enabled VirtualHost and any listed class of override;
-do not disable security checks merely to force PASS.
-
-Example when restart evidence is sound but a VirtualHost uses an unresolved
-remote handler:
+For the reported PHP packages, with their PPA origin verified in local APT metadata:
 
 ```text
-Restart freshness: PASS
-Web handler coverage: UNKNOWN
-Services: UNKNOWN
-Reboot: NO
-Overall: UNKNOWN
-WARNING: Web handler coverage unverified: ... review enabled VirtualHost overrides.
+PHP Runtime Security Checker v1.1.0
+OS: Ubuntu 24.04.5 LTS (amd64)
+PHP CLI: 8.4.27-1+ubuntu24.04.1+deb.sury.org+1
+PHP FPM: 8.4.27-1+ubuntu24.04.1+deb.sury.org+1
+CVE-2026-109618: PASS
+CVE-2026-109619: PASS
+Overall: PASS (PHP package checks)
+Scope: Installed PHP packages only; Laravel dependencies and running workers are not checked.
 ```
 
-If process evidence cannot be read, the message is **restart freshness unverified**
-with a suggested evidence check. Inspect package metadata and `/proc` permissions
-and retry a stable read-only snapshot. Running `sudo bash bin/php-security-check
---check` can provide read access to root-owned process evidence; it still performs
-no package changes or restarts. An actual start time predating package/config
-changes warrants reviewing and, if needed, restarting that particular service.
-A graceful Apache reload can retain old workers and is not equivalent to proving
-a full fresh process set.
+Each CVE line summarizes all detected runtime packages. JSON retains individual
+package results. There are no Apache handler, service, reboot or repeated generic
+warning sections. An unknown package mapping produces one note per package.
 
-JSON preserves `services.status` and adds `services.freshness`,
-`services.handler_coverage`, and per-service `services.evidence`. Human reports
-show the two dimensions explicitly. Development tests include externally restarted
-PHP 8.4.27, mixed mod_php/FPM, stale workers, failed evidence, VirtualHost overrides
-and anonymous/deleted mappings. Run:
+| Result / exit | Meaning |
+| --- | --- |
+| PASS / 0 | Installed packages meet the documented baselines for these two CVEs |
+| FAIL / 1 | A package is below a verified Ubuntu vendor fix |
+| UNKNOWN / 2 | Package origin/backport mapping, platform or PHP inventory is unverified |
+| ERROR / 3 | Invalid command, package query or report output failure |
+
+Ubuntu backports use exact documented source/revision mappings. Recognized PPA
+packages use upstream fixed-version baselines. Older PPA builds and unknown
+origins remain UNKNOWN because their backports cannot be inferred. Provenance
+comes from the installed version's local APT policy block; binary contents are
+not independently authenticated. See [sources and verification date](data/SOURCES.md).
+
+## Safety and scope
+
+Version 1.1 removes `--fix`, `--restart` and `--yes`, along with service/handler
+inspection. It never upgrades packages, restarts services, reads application
+secrets or executes PHP. There are no automatic remediation commands.
+
+PASS applies only to installed package evidence for the two named CVEs. It does
+not certify Laravel, a server, containers, custom PHP builds or the PHP actually
+loaded by workers. If packages were recently updated, manage any required PHP-FPM,
+Apache and Laravel worker restarts separately. Those operations are outside this
+checker's scope.
+
+## Development
 
 ```sh
 for file in bin/php-security-check lib/*.sh tests/*.sh examples/*.sh; do
@@ -151,10 +80,11 @@ shellcheck -x bin/php-security-check lib/*.sh tests/*.sh examples/*.sh
 bash tests/run.sh
 ```
 
-The evidence probes are mocked in development; a real unprivileged `/proc` parser
-check additionally runs on Linux. No APT upgrade or real service restart is needed
-for these tests. Live Ubuntu service validation is still a separate deployment step.
+Tests use package fixtures and reject accidental service/package modifications.
+Ruby parses JSON in CI; it is not a runtime dependency. macOS tests use a limited
+version-comparison mock; Ubuntu CI uses real dpkg comparisons. No live server
+remediation is performed. For a video demo, show the read-only check, JSON output
+and tests on a disposable VM without displaying private application data.
 
-Implementation references: [systemd properties](https://www.freedesktop.org/software/systemd/man/latest/systemctl),
-[Apache FPM handler syntax](https://httpd.apache.org/docs/2.4/mod/mod_proxy_fcgi.html),
-and [PHP-FPM configuration](https://www.php.net/manual/en/install.fpm.configuration.php).
+MIT license. See [Burmese README](README.my.md), [security policy](SECURITY.md)
+and [contributing guide](CONTRIBUTING.md).

@@ -1,11 +1,13 @@
 # shellcheck shell=bash
-VERSION=1.0.0
-warnings=()
-limitations=('Only the two documented CVEs are assessed; this is not a complete server security audit.' 'Containers, custom builds, remote FPM, application dependencies and long-running CLI workers require manual review.' 'APT metadata is local and may be stale; refresh it separately before remediation.')
-runtimes=(); services=(); packages=(); results=(); origins=(); activities=()
-freshness_status=PASS; handler_status=PASS; service_evidence=(); apache_php_modules=(); apache_config_files=()
-overall=PASS; service_status=PASS; reboot=NO; operation_error=0
-warn() { warnings+=("$*"); }
+VERSION=1.1.0
+scope='Installed PHP packages only; Laravel dependencies and running workers are not checked.'
+warnings=(); runtimes=(); results=(); origins=()
+overall=PASS; operation_error=0
+warn() {
+    local message
+    for message in "${warnings[@]}"; do [[ $message != "$*" ]] || return 0; done
+    warnings+=("$*")
+}
 unknown() { [[ $overall == FAIL ]] || overall=UNKNOWN; warn "$*"; }
 fail() { overall=FAIL; }
 error() { operation_error=1; warn "$*"; }

@@ -9,7 +9,7 @@ report_json() {
         IFS='|' read -r p v kind <<< "${runtimes[i]}"
         printf '%s{"package":' "$sep"; json_string "$p"; printf ',"version":'; json_string "$v"
         printf ',"type":'; json_string "$kind"; printf ',"origin":'; json_string "${origins[i]}"
-        printf ',"activity":'; json_string "${activities[i]}"; printf '}'; sep=,
+        printf '}'; sep=,
     done
     printf '],"cves":['; sep=''
     for entry in "${results[@]}"; do
@@ -19,20 +19,22 @@ report_json() {
         printf '}'; sep=,
     done
     printf ']'
-    printf ',"services":{"names":'; json_array "${services[@]}"; printf ',"status":'; json_string "$service_status"
-    printf ',"freshness":'; json_string "$freshness_status"
-    printf ',"handler_coverage":'; json_string "$handler_status"
-    printf ',"evidence":'; json_array "${service_evidence[@]}"; printf '}'
-    printf ',"reboot":'; json_string "$reboot"; printf ',"overall":'; json_string "$overall"
-    printf ',"warnings":'; json_array "${warnings[@]}"; printf ',"limitations":'; json_array "${limitations[@]}"; printf '}\n'
+    printf ',"scope":'; json_string "$scope"
+    printf ',"overall":'; json_string "$overall"
+    printf ',"warnings":'; json_array "${warnings[@]}"; printf '}\n'
 }
 report_human() {
-    local r
-    printf 'PHP Runtime Security Checker v%s\nOS: %s\nArchitecture: %s\n' "$VERSION" "$os_name" "$arch"
-    for r in "${runtimes[@]}"; do printf 'Runtime: %s\n' "$r"; done
-    for r in "${results[@]}"; do printf 'Advisory: %s\n' "$r"; done
-    printf 'Restart freshness: %s\nWeb handler coverage: %s\n' "$freshness_status" "$handler_status"
-    printf 'Services: %s\nReboot: %s\nOverall: %s\n' "$service_status" "$reboot" "$overall"
-    for r in "${warnings[@]}"; do printf 'WARNING: %s\n' "$r"; done
-    for r in "${limitations[@]}"; do printf 'Limitation: %s\n' "$r"; done
+    local entry p v kind cve
+    printf 'PHP Runtime Security Checker v%s\nOS: %s (%s)\n' "$VERSION" "$os_name" "$arch"
+    for entry in "${runtimes[@]}"; do
+        IFS='|' read -r p v kind <<< "$entry"
+        printf 'PHP %s: %s\n' "$kind" "$v"
+    done
+    for cve in CVE-2026-109618 CVE-2026-109619; do
+        advisory_status "$cve"
+        printf '%s: %s\n' "$cve" "$advisory_result"
+    done
+    printf 'Overall: %s (PHP package checks)\n' "$overall"
+    for entry in "${warnings[@]}"; do printf 'Note: %s\n' "$entry"; done
+    printf 'Scope: %s\n' "$scope"
 }

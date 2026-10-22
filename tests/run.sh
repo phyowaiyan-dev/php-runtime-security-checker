@@ -1,196 +1,133 @@
 #!/usr/bin/env bash
 set -euo pipefail
 BASE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-export BASE
 # shellcheck source=../lib/common.sh
 source "$BASE/lib/common.sh"
-for module in detect advisories audit update handlers services report; do
+for module in detect advisories audit report; do
     # shellcheck source=/dev/null
     source "$BASE/lib/$module.sh"
 done
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 count=0
-ok() { count=$((count+1)); printf 'ok %d - %s\n' "$count" "$1"; }
 assert() { "$@" || { printf 'FAIL: %s\n' "$*" >&2; exit 1; }; }
-# Pure Debian version comparison mock for these fixtures; actual dpkg is used on Linux.
+ok() { count=$((count+1)); printf 'ok %d - %s\n' "$count" "$1"; }
+# Real Debian comparisons on Linux; limited fixture comparator on macOS.
 if ! command -v dpkg >/dev/null; then
     dpkg() {
-        if [[ $1 == --print-architecture ]]; then printf "amd64\n"; return; fi
+        if [[ $1 == --print-architecture ]]; then printf 'amd64\n'; return; fi
         [[ $1 == --compare-versions ]] || return 1
-        local greatest
-        greatest=$(printf '%s\n%s\n' "$2" "$4" | sort -V | tail -1)
-        [[ $greatest == "$2" ]]
+        [[ $(printf '%s\n%s\n' "$2" "$4" | sort -V | tail -1) == "$2" ]]
     }
 fi
 os_version=24.04
-assess php8.3-cli 8.3.6-0ubuntu0.24.04.13 Ubuntu CVE-2026-109618
-assert test "$assessment" = PASS; ok 'Ubuntu backport'
-assess php8.3-fpm 8.3.6-0ubuntu0.24.04.12 Ubuntu CVE-2026-109619
-assert test "$assessment" = FAIL; ok 'known vulnerable Ubuntu revision'
-for entry in '8.3 8.3.36' '8.4 8.4.27' '8.2 8.2.35' '8.5 8.5.12'; do
-    read -r b v <<< "$entry"
-    assess "php$b-cli" "1:$v-1+deb.sury.org+1" Ondrej-PPA CVE-2026-109618
-    assert test "$assessment" = PASS; ok "PPA $b with epoch"
+for cve in CVE-2026-109618 CVE-2026-109619; do
+    assess php8.3-fpm 8.3.6-0ubuntu0.24.04.13 Ubuntu "$cve"
+    assert test "$assessment" = PASS
+    assess php8.3-fpm 8.3.6-0ubuntu0.24.04.12 Ubuntu "$cve"
+    assert test "$assessment" = FAIL
 done
-assess php8.3-cli 8.3.35-1+deb.sury.org+1 Ondrej-PPA CVE-2026-109618
-assert test "$assessment" = UNKNOWN; ok 'unknown PPA backport is not labeled vulnerable'
+ok 'verified Ubuntu backports and vulnerable revisions'
+for entry in '8.2 8.2.35' '8.3 8.3.36' '8.4 8.4.27' '8.5 8.5.12'; do
+    read -r branch version <<< "$entry"
+    assess "php$branch-cli" "1:$version-1+deb.sury.org+1" Ondrej-PPA CVE-2026-109618
+    assert test "$assessment" = PASS
+done
+ok 'supported upstream baselines and PPA epochs'
+assess php8.4-fpm 8.4.26-1+deb.sury.org+1 Ondrej-PPA CVE-2026-109618
+assert test "$assessment" = UNKNOWN
+assess php8.4-fpm 8.4.27 unknown CVE-2026-109618
+assert test "$assessment" = UNKNOWN
 assess php8.1-cli 8.1.34 unknown CVE-2026-109618
-assert test "$assessment" = UNKNOWN; ok 'EOL custom runtime'
+assert test "$assessment" = UNKNOWN
+ok 'unknown origins, backports and unsupported versions cannot pass'
 assess php8.3-cli 9:8.3.6-0ubuntu0.24.04.13 Ubuntu CVE-2026-109618
-assert test "$assessment" = UNKNOWN; ok 'foreign epoch fails closed'
-assess php8.4-cli 8.4.27 unknown CVE-2026-109618
-assert test "$assessment" = UNKNOWN; ok 'unknown origin cannot pass'
-# Invoked through sourced service functions.
+assert test "$assessment" = UNKNOWN
+ok 'foreign vendor epoch cannot pass a mapping'
+# Read-only detection fixtures. Any old service/remediation probe fails this suite.
+read_os() { os_id=ubuntu; os_version=24.04; os_name='Ubuntu 24.04.5 LTS'; }
 # shellcheck disable=SC2329
-systemctl() { [[ ${MOCK_INACTIVE:-0} == 0 ]]; }
-# Probe stubs isolate summary behavior; detailed evidence tests run in services.sh.
+dpkg-query() { [[ $1 == -W ]] || return 1; printf '%s\n' "$INVENTORY"; }
 # shellcheck disable=SC2329
-inspect_web_handlers() { return 0; }
+apt-cache() {
+    printf '%s\n' ' Version table:' " *** $FIXTURE_VERSION 500" "   500 $FIXTURE_REPO noble/main amd64 Packages" '   100 /var/lib/dpkg/status'
+}
 # shellcheck disable=SC2329
-verify_freshness() { freshness_reason='restart freshness unverified: fixture'; [[ ${MOCK_FRESH:-0} == 1 ]]; }
-services=(php8.3-fpm apache2); overall=PASS; MOCK_FRESH=0
-inspect_services
-assert test "$overall" = UNKNOWN; ok 'mixed serving runtimes require restart evidence'
-MOCK_FRESH=1; overall=PASS; service_status=PASS
-inspect_services
-assert test "$overall" = PASS; ok 'verified restart state'
-MOCK_INACTIVE=1; overall=PASS
-inspect_services
-assert test "$overall" = UNKNOWN; ok 'inactive service'
-unset MOCK_INACTIVE
-apache2ctl() { return 1; }
-operation_error=0
-restart_services
-assert test "$operation_error" = 1; ok 'Apache configuration failure blocks restart'
-services=(php8.3-fpm)
+systemctl() { : > "$TMP/forbidden"; return 1; }
 # shellcheck disable=SC2329
-systemctl() { [[ $1 != restart ]]; }
-operation_error=0
-restart_services
-assert test "$operation_error" = 1; ok 'restart failure'
-# Remediation must reject unsafe plans before any real mutation/root check.
-apt_get_calls=0
-apt-get() { printf '%s\n' "$PLAN"; }
-mode=fix; supported=1; packages=(php8.3-cli); holds=''; yes=1
-for PLAN in 'Remv php8.3-cli [8.3.6]' 'Inst unrelated [1] (2)' 'Inst php8.4-cli (8.4.27)' 'Inst php8.3-cli (8.3.36)'; do
-    operation_error=0
-    modify
-    assert test "$operation_error" = 1
+apt-get() { : > "$TMP/forbidden"; return 1; }
+# shellcheck disable=SC2329
+apache2ctl() { : > "$TMP/forbidden"; return 1; }
+reset() { warnings=(); runtimes=(); results=(); origins=(); overall=PASS; operation_error=0; }
+FIXTURE_VERSION=8.4.27-1+ubuntu24.04.1+deb.sury.org+1
+FIXTURE_REPO=https://ppa.launchpadcontent.net/ondrej/php/ubuntu
+INVENTORY=$'php8.4-cli\t'"$FIXTURE_VERSION"$'\tinstalled\nphp8.4-fpm\t'"$FIXTURE_VERSION"$'\tinstalled'
+reset; detect; audit
+assert test "$overall" = PASS
+assert test "${#warnings[@]}" = 0
+assert test "${#runtimes[@]}" = 2
+assert test ! -e "$TMP/forbidden"
+report_human > "$TMP/patched.txt"
+report_json > "$TMP/patched.json"
+assert test "$(awk '/^CVE-/ {n++} END {print n}' "$TMP/patched.txt")" = 2
+if rg 'WARNING|Services:|handler|freshness' "$TMP/patched.txt"; then exit 1; fi
+ok 'reported Laravel-host PHP 8.4.27 fixture passes with a compact warning-free report'
+FIXTURE_REPO=https://unverified.example/ubuntu
+reset; detect; audit
+assert test "$overall" = UNKNOWN
+assert test "${#warnings[@]}" = 2
+warn "${warnings[0]}"
+assert test "${#warnings[@]}" = 2
+ok 'unknown mapping notes are deduplicated per package, not repeated per CVE'
+# An archive for another version must not authenticate the installed version.
+# shellcheck disable=SC2329
+apt-cache() {
+    printf '%s\n' " *** $FIXTURE_VERSION 100" '  100 /var/lib/dpkg/status' ' 8.4.26-1 500' \
+        '  500 https://ppa.launchpadcontent.net/ondrej/php/ubuntu noble/main amd64 Packages'
+}
+reset; detect; audit
+assert test "${origins[0]}" = unknown
+assert test "$overall" = UNKNOWN
+ok 'provenance stays within the installed version block'
+INVENTORY=''; reset; detect; audit
+assert test "$overall" = UNKNOWN
+advisory_status CVE-2026-109618
+assert test "$advisory_result" = UNKNOWN
+ok 'no packaged PHP is UNKNOWN'
+reset
+runtimes=('php8.3-cli|8.3.6-0ubuntu0.24.04.12|CLI' 'php8.4-fpm|8.4.27|FPM'); origins=(Ubuntu unknown)
+audit
+advisory_status CVE-2026-109618
+assert test "$overall" = FAIL
+assert test "$advisory_result" = FAIL
+ok 'known vulnerable package takes precedence over unknown package'
+if command -v ruby >/dev/null; then
+    ruby -rjson -e 'r=JSON.parse(File.read(ARGV[0])); abort unless r["overall"]=="PASS" && r["warnings"].empty? && r["cves"].length==4; abort if r.key?("services"); abort unless r["scope"].include?("not checked")' "$TMP/patched.json"
+fi
+ok 'JSON preserves per-package evidence and explicit package-only scope'
+json_string $'quote" slash\\ tab\t newline\n\001' > "$TMP/escape.json"
+if command -v ruby >/dev/null; then ruby -rjson -e 'JSON.parse(File.read(ARGV[0]))' "$TMP/escape.json"; fi
+ok 'JSON escaping'
+for option in --fix --restart --yes --invalid --output; do
+    set +e
+    bash "$BASE/bin/php-security-check" "$option" > /dev/null 2>&1
+    status=$?
+    set -e
+    assert test "$status" = 3
 done
-ok 'APT removal, unrelated package, branch switch and new install rejected'
-holds=php8.3-cli; operation_error=0
-modify
-assert test "$operation_error" = 1; ok 'held package rejected'
-# Exercise entry point and parse its real JSON with Ruby (test dependency only).
-TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+ok 'modification and invalid options are rejected'
 set +e
-bash "$BASE/bin/php-security-check" --json > "$TMP/report.json"
+bash "$BASE/bin/php-security-check" --json --output "$TMP/cli.json"
 status=$?
 set -e
-assert test "$status" -ge 0; assert test "$status" -le 3
 if command -v ruby >/dev/null; then
-    ruby -rjson -e 'r=JSON.parse(File.read(ARGV[0])); abort unless %w[PASS FAIL UNKNOWN ERROR].include?(r["overall"]); abort unless r["limitations"].is_a?(Array)' "$TMP/report.json"
+    ruby -rjson -e 'r=JSON.parse(File.read(ARGV[0])); abort unless {"PASS"=>0,"FAIL"=>1,"UNKNOWN"=>2,"ERROR"=>3}[r["overall"]]==ARGV[1].to_i' "$TMP/cli.json" "$status"
 fi
-ok 'real entry point JSON'
-for args in --invalid '--check --fix' '--yes' '--output'; do
-    set +e
-    # Intentional word splitting: fixed option fixtures.
-    # shellcheck disable=SC2086
-    bash "$BASE/bin/php-security-check" $args >/dev/null 2>&1
-    status=$?
-    set -e
-    assert test "$status" = 3
-done
-ok 'invalid arguments'
-json_string $'quote" slash\\ tab\t newline\n\001' > "$TMP/string.json"
-if command -v ruby >/dev/null; then ruby -rjson -e 'JSON.parse(File.read(ARGV[0]))' "$TMP/string.json"; fi
-ok 'JSON escaping control characters'
-# Successful and failed fix orchestration: every privileged entry point is replaced.
-# shellcheck disable=SC2329
-is_root() { return 0; }
-# shellcheck disable=SC2329
-install_packages() { [[ ${MOCK_APT_FAIL:-0} == 0 ]]; }
-# shellcheck disable=SC2329
-restart_services() { restarted=1; }
-# shellcheck disable=SC2329
-detect() { runtimes=('php8.3-cli|8.3.6-0ubuntu0.24.04.13|CLI'); origins=(Ubuntu); activities=(installed); packages=(); services=(); }
-holds=''; PLAN='Inst php8.3-cli [8.3.6-0ubuntu0.24.04.12] (8.3.6-0ubuntu0.24.04.13 Ubuntu:24.04 [amd64])'
-warnings+=('superseded restart warning'); packages=(php8.3-cli); operation_error=0; overall=FAIL; os_version=24.04
-modify
-assert test "$operation_error" = 0
-assert test "$overall" = PASS
-assert test "${warnings[*]}" = "${warnings[*]//superseded restart warning/}"
-ok 'mocked fix re-audits patched packages and clears superseded warnings'
-packages=(php8.3-cli); operation_error=0; MOCK_APT_FAIL=1
-modify
-assert test "$operation_error" = 1
-ok 'mocked upgrade failure fails closed'
-unset MOCK_APT_FAIL
-# Restore real read-only functions for detection tests.
-# shellcheck source=../lib/detect.sh
-source "$BASE/lib/detect.sh"
-# Full detection fixtures: no system mutations, no config content emitted.
-read_os() { os_id=ubuntu; os_version=24.04; os_name='Ubuntu 24.04 LTS'; }
-# shellcheck disable=SC2329
-dpkg-query() {
-    if [[ $1 == -W ]]; then printf '%s\n' "$INVENTORY"; else return 1; fi
-}
-# shellcheck disable=SC2329
-apt-mark() { return 0; }
-# shellcheck disable=SC2329
-apt-cache() {
-    printf '%s\n' "$2:" '  Installed: 8.3.6-0ubuntu0.24.04.13' '  Candidate: 8.3.6-0ubuntu0.24.04.13' \
-        '  Version table:' ' *** 8.3.6-0ubuntu0.24.04.13 500' \
-        '        500 http://security.ubuntu.com/ubuntu noble-security/main amd64 Packages' \
-        '        100 /var/lib/dpkg/status'
-}
-# shellcheck disable=SC2329
-systemctl() { return 1; }
-INVENTORY=$'php8.3-cli\t8.3.6-0ubuntu0.24.04.13\tinstalled\nphp8.3-fpm\t8.3.6-0ubuntu0.24.04.13\tinstalled\nlibapache2-mod-php8.3\t8.3.6-0ubuntu0.24.04.13\tinstalled'
-runtimes=(); services=(); packages=(); origins=(); activities=(); overall=PASS
-operation_error=0; detect; audit
-assert test "${#runtimes[@]}" = 3
-assert test "${origins[0]}" = Ubuntu
-assert test "${activities[1]}" = inactive
-assert test "$overall" = UNKNOWN
-ok 'full mixed CLI/FPM/mod_php detection and origin fixture'
-# A trusted archive for a different version must not authenticate the installed one.
-# shellcheck disable=SC2329
-apt-cache() {
-    printf '%s\n' '  Version table:' ' *** 8.3.6-0ubuntu0.24.04.13 100' \
-        '        100 /var/lib/dpkg/status' '     8.3.6-0ubuntu0.24.04.12 500' \
-        '        500 http://security.ubuntu.com/ubuntu noble-security/main amd64 Packages'
-}
-runtimes=(); services=(); packages=(); origins=(); activities=(); overall=PASS
-detect
-assert test "${origins[0]}" = unknown
-ok 'installed origin does not inherit a different version archive'
-INVENTORY=''; runtimes=(); origins=(); activities=(); services=(); packages=(); overall=PASS
-detect; audit
-assert test "${#runtimes[@]}" = 0
-assert test "$overall" = UNKNOWN
-ok 'no PHP cannot produce false green'
-# Check final CLI exit/report agreement and no-clobber semantics.
-for format in --json --check; do
-    set +e
-    bash "$BASE/bin/php-security-check" "$format" --output "$TMP/output-${format#--}" >/dev/null
-    status=$?
-    set -e
-    if [[ $format == --json ]] && command -v ruby >/dev/null; then
-        ruby -rjson -e 'r=JSON.parse(File.read(ARGV[0])); expected={"PASS"=>0,"FAIL"=>1,"UNKNOWN"=>2,"ERROR"=>3}; abort unless expected[r["overall"]]==ARGV[1].to_i' "$TMP/output-json" "$status"
-    fi
-    set +e
-    bash "$BASE/bin/php-security-check" "$format" --output "$TMP/output-${format#--}" >/dev/null 2>&1
-    status=$?
-    set -e
-    assert test "$status" = 3
-done
-ok 'CLI exit status matches JSON and existing output is preserved'
-: > "$TMP/reboot-required"
-detect_reboot "$TMP/reboot-required"
-assert test "$reboot" = REQUIRED
-detect_reboot "$TMP/absent"
-assert test "$reboot" = NO
-ok 'reboot-required state is separate'
-printf '%d base checks passed\n' "$count"
-bash "$BASE/tests/services.sh"
-bash "$BASE/tests/evidence.sh"
+set +e
+bash "$BASE/bin/php-security-check" --output "$TMP/cli.json" > /dev/null 2>&1
+status=$?
+set -e
+assert test "$status" = 3
+ok 'entry-point JSON/exit agreement and no-clobber output'
+printf '%d checks passed\n' "$count"
+printf '\nPatched-host fixture report (not a live server audit):\n'
+cat "$TMP/patched.txt"

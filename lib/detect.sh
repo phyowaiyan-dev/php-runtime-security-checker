@@ -10,15 +10,13 @@ read_os() {
 detect() {
     read_os
     arch=$(dpkg --print-architecture 2>/dev/null) || arch=unknown
-    case $os_id:$os_version:$arch in ubuntu:22.04:amd64|ubuntu:22.04:arm64|ubuntu:24.04:amd64|ubuntu:24.04:arm64|ubuntu:26.04:amd64|ubuntu:26.04:arm64) supported=1;; *) supported=0; unknown 'Unsupported OS or architecture.';; esac
-    local inventory p v state policy kind active path owner
+    case $os_id:$os_version:$arch in ubuntu:22.04:amd64|ubuntu:22.04:arm64|ubuntu:24.04:amd64|ubuntu:24.04:arm64|ubuntu:26.04:amd64|ubuntu:26.04:arm64) :;; *) unknown 'Unsupported OS or architecture.';; esac
+    local inventory p v state policy kind
     inventory=$(dpkg-query -W '-f=${binary:Package}\t${Version}\t${db:Status-Status}\n' 2>/dev/null) || { error 'Cannot enumerate packages.'; return; }
-    holds=$(apt-mark showhold 2>/dev/null) || { holds=''; unknown 'Cannot inspect package holds.'; }
     while IFS=$'\t' read -r p v state; do
         [[ $state == installed ]] || continue
         p=${p%%:*}
         [[ $p =~ ^(php[0-9]+\.[0-9]+(-[a-z0-9-]+)?|libapache2-mod-php[0-9]+\.[0-9]+)$ ]] || continue
-        packages+=("$p")
         case $p in *-cli) kind=CLI;; *-fpm) kind=FPM;; *-cgi) kind=CGI;; libapache2-mod-*) kind=mod_php;; *) continue;; esac
         policy=$(apt-cache policy "$p" 2>/dev/null) || policy=''
         # Attribute only the installed version's version-table block. Never expose repository URLs.
@@ -34,40 +32,7 @@ detect() {
             b && /https?:\/\/ppa\.launchpad(content)?\.net\/ondrej\/php\// {ok=1}
             END {exit !ok}'; then origin=Ondrej-PPA
         fi
-        active=unknown
-        case $kind in
-            FPM) active=$(systemctl is-active "$p" 2>/dev/null) || active=inactive; services+=("$p");;
-            mod_php) active=installed; services+=(apache2);;
-            CLI) active=installed;; CGI) active=unknown; unknown 'CGI handler and process lifecycle require manual review.';;
-        esac
-        runtimes+=("$p|$v|$kind"); origins+=("$origin"); activities+=("$active")
+        runtimes+=("$p|$v|$kind"); origins+=("$origin")
     done <<< "$inventory"
     if ((${#runtimes[@]}==0)); then unknown 'No packaged PHP runtime found.'; fi
-    for path in /usr/local/bin/php /usr/local/sbin/php-fpm /opt/php/bin/php; do
-        [[ ! -e $path ]] || unknown 'Custom PHP executable detected; outside package audit scope.'
-    done
-    path=$(command -v php || true)
-    if [[ -n $path ]]; then
-        owner=$(dpkg-query -S "$(readlink -f "$path")" 2>/dev/null) || owner=''
-        [[ -n $owner ]] || unknown 'Default PHP command is not owned by a Debian package.'
-    fi
-    if [[ -e /.dockerenv ]] || systemctl is-active --quiet docker 2>/dev/null; then unknown 'Docker/container runtime detected; container PHP is outside scope.'; fi
-    detect_reboot /var/run/reboot-required
-}
-remaining_updates() {
-    local p policy candidate installed
-    for p in "${packages[@]}"; do
-        policy=$(apt-cache policy "$p" 2>/dev/null) || { unknown 'Cannot inspect PHP update candidates.'; continue; }
-        installed=$(printf '%s\n' "$policy" | awk '$1=="Installed:" {print $2}')
-        candidate=$(printf '%s\n' "$policy" | awk '$1=="Candidate:" {print $2}')
-        if [[ -n $candidate && $candidate != '(none)' && -n $installed ]]; then
-            if dpkg --compare-versions "$candidate" gt "$installed"; then warn "PHP package update remains available: $p"; fi
-        else warn "PHP package candidate unavailable: $p"; fi
-    done
-}
-
-detect_reboot() {
-    reboot=NO
-    [[ ! -e $1 ]] || reboot=REQUIRED
-    return 0
 }

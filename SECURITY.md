@@ -11,7 +11,8 @@ exploit details or secrets in a public issue. There is no promised response SLA.
 Include affected commit/version, Ubuntu version, minimal sanitized reproduction,
 impact, and expected behavior. Never attach credentials or raw server configs.
 
-This tool runs local package-manager commands with root only on explicit fix or
-restart. Trust the checkout, APT configuration, local package database and OS.
+This version is read-only and offers no upgrade or restart commands. Trust the
+checkout, local APT metadata, package database and OS. Package PASS does not
+certify running PHP workers or Laravel dependencies.
 It is not a malware detector or full server audit. Unknown findings require
 manual review. Advisory updates must cite primary sources and verification dates.
