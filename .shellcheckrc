@@ -1,0 +1,3 @@
+# Modules deliberately exchange globals; runtime sourcing is relative to the entry point.
+disable=SC2034,SC2154
+source-path=SCRIPTDIR

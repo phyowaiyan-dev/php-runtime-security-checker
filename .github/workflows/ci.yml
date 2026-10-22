@@ -1,0 +1,16 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  shell:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck ruby
+      - run: bash -n bin/php-security-check lib/*.sh tests/*.sh
+      - run: shellcheck -x bin/php-security-check lib/*.sh tests/*.sh
+      - run: bash tests/run.sh

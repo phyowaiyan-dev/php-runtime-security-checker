@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -uo pipefail
+if ((BASH_VERSINFO[0]<4 || (BASH_VERSINFO[0]==4 && BASH_VERSINFO[1]<4))); then
+    printf 'Bash 4.4+ is required.\n' >&2; exit 3
+fi
+export LC_ALL=C
+BASE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=../lib/common.sh
+source "$BASE/lib/common.sh"
+for module in detect advisories audit update services report; do
+    # shellcheck source=/dev/null
+    source "$BASE/lib/$module.sh"
+done
+mode=check; yes=0; json=0; output=''; selected=0
+usage() { printf '%s\n' 'Usage: php-security-check [--check|--fix|--restart] [--yes] [--json] [--output PATH] [--no-color]' 'Default: read-only check. Exit: 0 PASS, 1 FAIL, 2 UNKNOWN, 3 ERROR.'; }
+while (($#)); do
+    case $1 in
+        --check|--fix|--restart) ((selected==0)) || { usage >&2; exit 3; }; mode=${1#--}; selected=1;;
+        --yes) yes=1;; --json) json=1;; --no-color) :;;
+        --output) shift; (($#)) && [[ -n $1 && $1 != --* ]] || { usage >&2; exit 3; }; output=$1;;
+        --help) usage; exit 0;; --version) printf '%s\n' "$VERSION"; exit 0;;
+        *) usage >&2; exit 3;;
+    esac
+    shift
+done
+[[ $yes == 0 || $mode != check ]] || { usage >&2; exit 3; }
+if [[ ! -r /etc/os-release ]] || ! command -v dpkg-query >/dev/null; then
+    os_name=unknown; arch=unknown; overall=UNKNOWN; warn 'Ubuntu package database unavailable.'
+else
+    detect; audit
+    [[ $mode == check ]] || modify
+fi
+((operation_error==0)) || overall=ERROR
+render() { if ((json)); then report_json; else report_human; fi; }
+if [[ -n $output ]]; then
+    # Noclobber prevents overwriting reports or following existing symlinks.
+    if ! (umask 077; set -o noclobber; render > "$output"); then printf 'Cannot create report output.\n' >&2; exit 3; fi
+else render; fi
+case $overall in PASS) exit 0;; FAIL) exit 1;; UNKNOWN) exit 2;; *) exit 3;; esac
