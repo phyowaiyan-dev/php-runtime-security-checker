@@ -20,7 +20,8 @@ report_human() {
     printf '  ------------------------------------------------------------\n'
     for entry in "${runtimes[@]}"; do
         IFS='|' read -r p v kind <<< "$entry"
-        printf '  %-25s %s\n' "$p" "$v"
+        runtime_status "$p"
+        printf '  %-25s %-7s %s\n' "$p" "$runtime_result" "$v"
     done
     printf '\n'
     for cve in CVE-2026-109618 CVE-2026-109619; do

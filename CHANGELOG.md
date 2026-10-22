@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.1 — Unreleased
+
+- Show each installed runtime's CVE package result, including patched branches on mixed systems.
+- Group identical advisory notes by PHP branch instead of repeating them for every runtime package.
+- Explain unchanged APT candidates and Ubuntu release mismatches with read-only policy inspection commands.
+- Refuse PPA candidates built for a different Ubuntu release in both planning and the root transaction.
+- Cover the reported Ubuntu 26.04 / Ubuntu 24.04 PHP build mixture with mocked regressions.
+
 ## 1.2.0 — Unreleased
 
 - Restore guided check, scope preview, one 1/0 confirmation, fix and automatic recheck.

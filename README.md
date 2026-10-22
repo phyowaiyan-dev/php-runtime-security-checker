@@ -27,11 +27,11 @@ Use a trusted local checkout. No Composer, Python, Node.js or JSON/export setup.
 The confirmation authorizes metadata refresh and verified updates **within the displayed package/service scope**. Final versions can differ from the cached preview after refresh. If the refreshed plan needs broader changes, it stops. A patched system exits immediately without root, metadata refresh or restarts.
 
 ```text
-PHP Runtime Security Checker  1.2.0
+PHP Runtime Security Checker  1.2.1
   Ubuntu 24.04.5 LTS  |  amd64
   ------------------------------------------------------------
-  php8.4-cli                8.4.27-1+ubuntu24.04.1+deb.sury.org+1
-  php8.4-fpm                8.4.27-1+ubuntu24.04.1+deb.sury.org+1
+  php8.4-cli                PASS    8.4.27-1+ubuntu24.04.1+deb.sury.org+1
+  php8.4-fpm                PASS    8.4.27-1+ubuntu24.04.1+deb.sury.org+1
 
   CVE-2026-109618           PASS
   CVE-2026-109619           PASS
@@ -127,3 +127,32 @@ application data. MIT licensed; see [Burmese README](README.my.md),
 
 Implementation references: [Ubuntu APT manual](https://manpages.ubuntu.com/manpages/noble/man8/apt-get.8.html),
 [systemd service properties](https://freedesktop.org/software/systemd/man/latest/org.freedesktop.systemd1.html).
+
+## Ubuntu release upgrades and unchanged candidates
+
+If the host is Ubuntu 26.04 but installed PPA versions contain `+ubuntu24.04.1`,
+the build markers target a different Ubuntu release. This can happen with leftover
+packages after an OS upgrade. It does **not** prove which repository is enabled
+or why APT has no newer candidate: disabled/mismatched repositories, pinning or
+branch availability must be investigated from the actual APT policy.
+
+The report now shows PASS/FAIL/UNKNOWN next to every runtime. For example,
+verified Ubuntu `8.5.4-0ubuntu1.5` can pass while old 8.3/8.4 runtimes remain
+UNKNOWN. Installing or choosing PHP 8.5 as the default does not patch the other
+installed runtimes. The checker will not remove them or migrate applications.
+
+When candidates remain unchanged after metadata refresh, the report explains
+that APT offers no newer eligible version and provides read-only inspection
+commands, for example:
+
+```sh
+apt-cache policy php8.3-cli php8.4-cli php8.4-fpm
+```
+
+Review compatible repositories and pinning for the actual Ubuntu release. Do not
+blindly change repository codenames, remove runtimes or switch application PHP
+versions. A verified same-branch candidate built for the host release can be used
+through the guided flow; a candidate explicitly built for another release is
+refused, even if its upstream version contains the CVE fixes. Package build
+markers are compatibility evidence, never proof of origin or vulnerability.
+Redact credentials/private repository URLs before sharing policy output.

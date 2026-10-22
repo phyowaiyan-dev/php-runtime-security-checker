@@ -29,7 +29,7 @@ dpkg() {
     esac
 }
 # shellcheck disable=SC2329
-read_os() { os_id=${MOCK_OS:-ubuntu}; os_version=24.04; os_name='Ubuntu 24.04.5 LTS'; }
+read_os() { os_id=${MOCK_OS:-ubuntu}; os_version=${MOCK_RELEASE:-24.04}; os_name="Ubuntu $os_version LTS"; }
 # shellcheck disable=SC2329
 dpkg-query() {
     [[ $1 == -W ]] || return 1
@@ -41,6 +41,12 @@ dpkg-query() {
     printf 'php%s-fpm\t%s\tinstalled\tphp%s\n' "$MOCK_BRANCH" "$installed" "$MOCK_BRANCH"
     printf 'php%s-common\t%s\tinstalled\tphp%s\n' "$MOCK_BRANCH" "$installed" "$MOCK_BRANCH"
     if [[ $MOCK_MODPHP == 1 ]]; then printf 'libapache2-mod-php%s\t%s\tinstalled\tphp%s\n' "$MOCK_BRANCH" "$installed" "$MOCK_BRANCH"; fi
+    if [[ $MOCK_MIXED == 1 ]]; then
+        printf 'php8.3-cli\t8.3.35-1+ubuntu24.04.1+deb.sury.org+1\tinstalled\tphp8.3\n'
+        printf 'php8.3-common\t8.3.35-1+ubuntu24.04.1+deb.sury.org+1\tinstalled\tphp8.3\n'
+        printf 'php8.5-cli\t8.5.4-0ubuntu1.5\tinstalled\tphp8.5\n'
+        printf 'libapache2-mod-php8.5\t8.5.4-0ubuntu1.5\tinstalled\tphp8.5\n'
+    fi
     # A third-party extension must not enter the core PHP repair scope.
     printf 'php%s-redis\t6.0.0\tinstalled\tphp-redis\n' "$MOCK_BRANCH"
 }
@@ -48,6 +54,14 @@ dpkg-query() {
 apt-cache() {
     local installed
     installed=$(cat "$TMP/version")
+    if [[ $MOCK_MIXED == 1 ]]; then
+        case $2 in
+            *8.5*) printf ' Installed: 8.5.4-0ubuntu1.5\n Candidate: 8.5.4-0ubuntu1.5\n *** 8.5.4-0ubuntu1.5 500\n  500 http://security.ubuntu.com/ubuntu resolute-security/main amd64 Packages\n'; return;;
+            *8.3*) installed=8.3.35-1+ubuntu24.04.1+deb.sury.org+1;;
+        esac
+        printf ' Installed: %s\n Candidate: %s\n *** %s 100\n  100 /var/lib/dpkg/status\n' "$installed" "$installed" "$installed"
+        return
+    fi
     printf ' Installed: %s\n Candidate: %s\n Version table:\n' "$installed" "$MOCK_CANDIDATE"
     if [[ $installed != "$MOCK_CANDIDATE" && $MOCK_CANDIDATE != '(none)' ]]; then
         printf '  %s 500\n    500 %s noble/main amd64 Packages\n' "$MOCK_CANDIDATE" "${MOCK_NEW_REPO:-$MOCK_REPO}"
@@ -114,7 +128,7 @@ is_interactive() { [[ $MOCK_TTY == 1 ]]; }
 # shellcheck disable=SC2329
 transaction_policy_available() { [[ $MOCK_POLICY == 0 ]]; }
 reset() {
-    MOCK_MODPHP=0; MOCK_BRANCH=8.4; MOCK_CANDIDATE=8.4.27-1+ubuntu24.04.1+deb.sury.org+1
+    MOCK_RELEASE=24.04; MOCK_MIXED=0; MOCK_MODPHP=0; MOCK_BRANCH=8.4; MOCK_CANDIDATE=8.4.27-1+ubuntu24.04.1+deb.sury.org+1
     MOCK_REPO=https://ppa.launchpadcontent.net/ondrej/php/ubuntu
     MOCK_STATE_CHANGE=0; MOCK_NEW_REPO=''; MOCK_OLD_ORIGIN=1; MOCK_HOLD=''; MOCK_UNSAFE=''; MOCK_ACTIVE=1; MOCK_STATE=active
     MOCK_AUTH_FAIL=0; MOCK_REFRESH_FAIL=0; MOCK_INSTALL_FAIL=0; MOCK_PARTIAL=0
@@ -276,6 +290,27 @@ reset; mode=check
 workflow > "$TMP/sample"
 if grep -q $'\033' "$TMP/sample"; then exit 1; fi
 ok 'plain terminal report contains no ANSI escapes when color is disabled'
+reset; MOCK_RELEASE=26.04; MOCK_MIXED=1; MOCK_CANDIDATE=$(cat "$TMP/version")
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = UNKNOWN
+runtime_status php8.5-cli; assert test "$runtime_result" = PASS
+runtime_status php8.3-cli; assert test "$runtime_result" = UNKNOWN
+assert test "${#warnings[@]}" = 4
+assert grep -Fq 'targets Ubuntu 24.04; host is 26.04' "$TMP/output"
+assert grep -q 'APT candidate' "$TMP/output"
+assert grep -q 'apt-cache policy' "$TMP/output"
+if grep -q '/transaction.sh' "$TMP/calls"; then exit 1; fi
+ok 'Ubuntu 26.04 mixed 24.04 PPA builds/8.5 vendor fix reproduce the supplied log safely'
+reset; MOCK_RELEASE=26.04
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = UNKNOWN
+assert grep -q 'candidate targets Ubuntu 24.04' "$TMP/output"
+if grep -q '/transaction.sh' "$TMP/calls"; then exit 1; fi
+ok 'newer fixed but foreign-release PPA candidates are blocked'
+reset; MOCK_RELEASE=26.04; MOCK_CANDIDATE=8.4.27-1+ubuntu26.04.1+deb.sury.org+1
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = PASS
+ok 'a verified same-branch candidate built for the host release can repair old foreign builds'
 printf '\n%d checks passed; all privileged operations were mocked.\n' "$count"
 printf '\nSample patched-host report (fixture):\n'
 reset; printf '%s\n' "$MOCK_CANDIDATE" > "$TMP/version"; snapshot; report_human

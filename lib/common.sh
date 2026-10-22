@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-VERSION=1.2.0
+VERSION=1.2.1
 scope='Two PHP CVEs only; Laravel dependencies, custom/container PHP and existing workers are outside this package check.'
 warnings=(); runtimes=(); results=(); origins=(); inventory=''
 overall=PASS; operation_error=0; supported=0
@@ -37,4 +37,17 @@ run_root() {
 authorize_root() {
     ((EUID==0)) && return 0
     command -v sudo >/dev/null && sudo -v
+}
+
+package_branch() {
+    branch=${1#libapache2-mod-php}; branch=${branch#php}; branch=${branch%%-*}
+}
+# A PPA build marker describes its target Ubuntu release, not a CVE fix or trusted origin.
+ubuntu_build_release() {
+    build_release=''
+    if [[ $1 =~ \+ubuntu([0-9]{2}\.[0-9]{2})\. ]]; then build_release=${BASH_REMATCH[1]}; fi
+}
+release_matches_host() {
+    ubuntu_build_release "$1"
+    [[ -z $build_release || $build_release == "$os_version" ]]
 }

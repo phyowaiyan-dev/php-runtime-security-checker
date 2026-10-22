@@ -1,7 +1,4 @@
 # shellcheck shell=bash
-package_branch() {
-    branch=${1#libapache2-mod-php}; branch=${branch#php}; branch=${branch%%-*}
-}
 branch_has_fix() {
     local wanted=$1 id b fixed release vendor verified
     while IFS=$'\t' read -r id b fixed release vendor verified; do
@@ -77,11 +74,14 @@ build_plan() {
         candidate=$(awk '$1=="Candidate:" {print $2}' <<< "$policy")
         [[ $candidate =~ ^[0-9][A-Za-z0-9.+:~_-]*$ ]] || { block_reason="No installable candidate for $p in configured repositories."; return 1; }
         dpkg --compare-versions "$candidate" gt "$installed" || continue
+        if ! release_matches_host "$candidate"; then
+            block_reason="$p candidate targets Ubuntu $build_release, but this host is $os_version. Configure a compatible repository or migrate manually; no cross-release package will be installed."; return 1
+        fi
         policy_origin "$policy" "$candidate"; candidate_origin=$origin
         [[ $candidate_origin != unknown && ( $old_origin == unknown || $candidate_origin == "$old_origin" ) ]] || { block_reason="$p candidate changes or lacks verified provenance; automatic origin changes are blocked."; return 1; }
         pins+=("$p=$candidate"); plan_rows+=("$p|$installed|$candidate|$candidate_origin")
     done
-    ((${#pins[@]})) || { block_reason='No newer PHP patch is available in the configured repositories. No packages changed.'; return 1; }
+    ((${#pins[@]})) || { explain_no_candidates; return 1; }
     for ((i=0;i<${#runtimes[@]};i++)); do
         IFS='|' read -r p v kind <<< "${runtimes[i]}"
         package_branch "$p"
@@ -203,3 +203,23 @@ workflow() {
 }
 
 transaction_policy_available() { [[ ! -e /usr/sbin/policy-rc.d && ! -L /usr/sbin/policy-rc.d ]]; }
+
+explain_no_candidates() {
+    local entry p installed kind branch policy candidate seen=' '
+    block_reason='APT offers no newer eligible candidate for the unresolved PHP branches. No packages changed.'
+    for entry in "${runtimes[@]}"; do
+        IFS='|' read -r p installed kind <<< "$entry"
+        package_branch "$p"
+        [[ " ${fix_branches[*]} " == *" $branch "* && $seen != *" $branch "* ]] || continue
+        seen+="$branch "
+        policy=$(apt-cache policy "$p" 2>/dev/null) || policy=''
+        candidate=$(awk '$1=="Candidate:" {print $2}' <<< "$policy")
+        block_reason+=$'\n  '"PHP $branch: installed $installed; APT candidate ${candidate:-unavailable}."
+        if ! release_matches_host "$installed"; then
+            block_reason+=$'\n  '"This installed build targets Ubuntu $build_release; the host is $os_version."
+        fi
+        block_reason+=$'\n  '"Inspect: apt-cache policy $p"
+    done
+    block_reason+=$'\n  '"Review repositories for Ubuntu $os_version and APT pinning. This is not proof that no upstream patch exists."
+    block_reason+=$'\n  '"A patched different PHP branch does not patch these installed runtimes. No automatic branch switch or removal is attempted."
+}

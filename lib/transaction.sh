@@ -6,6 +6,10 @@ export LC_ALL=C
 BASE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=common.sh
 source "$BASE/lib/common.sh"
+# shellcheck source=detect.sh
+source "$BASE/lib/detect.sh"
+read_os
+[[ $os_id == ubuntu ]] || exit 70
 # shellcheck source=update.sh
 source "$BASE/lib/update.sh"
 (($#)) || exit 70
@@ -19,6 +23,7 @@ for pin in "${pins[@]}"; do
     IFS=$'\t' read -r state installed source <<< "$evidence"
     package_branch "$package"
     [[ $state == installed && $source == "php$branch" && ${candidate#*:} == "$branch."* ]] || exit 70
+    release_matches_host "$candidate" || exit 70
     dpkg --compare-versions "$candidate" gt "$installed" || exit 70
     scope_rows+=("$package|$installed|verified")
 done

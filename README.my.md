@@ -35,11 +35,11 @@ package/service scope ကို မချဲ့ပါ။ အပြင်ဘက�
 ပြည့်စုံပြီးသားစနစ်တွင် root၊ metadata refresh နှင့် restart မလိုဘဲ ပြီးဆုံးသည်။
 
 ```text
-PHP Runtime Security Checker  1.2.0
+PHP Runtime Security Checker  1.2.1
   Ubuntu 24.04.5 LTS  |  amd64
   ------------------------------------------------------------
-  php8.4-cli                8.4.27-1+ubuntu24.04.1+deb.sury.org+1
-  php8.4-fpm                8.4.27-1+ubuntu24.04.1+deb.sury.org+1
+  php8.4-cli                PASS    8.4.27-1+ubuntu24.04.1+deb.sury.org+1
+  php8.4-fpm                PASS    8.4.27-1+ubuntu24.04.1+deb.sury.org+1
 
   CVE-2026-109618           PASS
   CVE-2026-109619           PASS
@@ -131,3 +131,31 @@ fixture အတွက်သာ ဖြစ်သည်။ CI သည် Ubuntu 22.04
 arm64 နှင့် maintainer-script behavior ကို deployment မတိုင်မီ သီးခြား စစ်ရန်
 လိုအပ်သည်။ YouTube demo ကို disposable VM/snapshot တွင်သာ ပြပါ။
 အသေးစိတ်ကို [English README](README.md) တွင် ဖတ်နိုင်သည်။ MIT license ဖြစ်သည်။
+
+## Ubuntu Release မကိုက်ခြင်းနှင့် Candidate မပြောင်းခြင်း
+
+Host သည် Ubuntu 26.04 ဖြစ်ပြီး PPA package version တွင် `+ubuntu24.04.1`
+ပါနေလျှင် package build သည် Ubuntu release အခြားတစ်ခုကို target လုပ်ထားသည်။
+OS upgrade ပြီး ကျန်ခဲ့သော package ဖြစ်နိုင်သော်လည်း repository ပိတ်ထားခြင်း၊
+release မကိုက်ခြင်း၊ pinning သို့မဟုတ် branch package မရှိခြင်းတို့အနက်
+မည်သည့်အကြောင်းရင်းဖြစ်သည်ကို ဤ report တစ်ခုတည်းဖြင့် မဆုံးဖြတ်နိုင်ပါ။
+
+ယခု runtime တစ်ခုချင်းစီတွင် PASS/FAIL/UNKNOWN ကို ပြသည်။ Verified vendor
+PHP 8.5 package သည် PASS ဖြစ်သော်လည်း old 8.3/8.4 runtime များသည် UNKNOWN
+ဖြစ်နေနိုင်သည်။ PHP 8.5 ကို default ရွေးလိုက်ရုံဖြင့် အခြား installed runtime
+များ patch ဖြစ်သွားခြင်း မဟုတ်ပါ။ Tool က package မဖျက်၊ application PHP branch
+ကို အလိုအလျောက် မပြောင်းပါ။
+
+Metadata refresh ပြီး candidate မပြောင်းပါက APT က newer eligible version
+မပေးကြောင်း ရှင်းပြပြီး read-only စစ်ဆေးရန် command ကို ပြသည်။
+
+```bash
+apt-cache policy php8.3-cli php8.4-cli php8.4-fpm
+```
+
+Host release နှင့် ကိုက်ညီသော repository နှင့် pinning ကို စစ်ပါ။ Repository
+codename ကို မသိဘဲ အစားမထိုးပါနှင့်။ Host release အတွက် build လုပ်ထားသော
+verified same-branch candidate ရှိလျှင် guided repair ဖြင့် သုံးနိုင်သည်။
+အခြား release အတွက် build လုပ်ထားသော candidate ကို CVE fixed version
+ဖြစ်သော်လည်း မထည့်သွင်းပါ။ Build marker သည် origin သို့မဟုတ် vulnerability
+သက်သေ မဟုတ်ပါ။ Policy output မျှဝေရာတွင် credential/private URL များကို ဖျက်ပါ။
