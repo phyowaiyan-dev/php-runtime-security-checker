@@ -8,7 +8,7 @@ audit() {
         for cve in CVE-2026-109618 CVE-2026-109619; do
             assess "$p" "$v" "${origins[i]}" "$cve"
             results+=("$p|$cve|$assessment")
-            case $assessment in FAIL) fail;; UNKNOWN) unknown "$p: no verified package/backport mapping.";; esac
+            case $assessment in FAIL) fail;; UNKNOWN) unknown "$p: $assessment_reason";; esac
         done
     done
 }

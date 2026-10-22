@@ -1,5 +1,6 @@
 # shellcheck shell=bash
 read_os() {
+    [[ -r /etc/os-release ]] || return 1
     local key value
     os_id=unknown; os_version=unknown; os_name=unknown
     while IFS='=' read -r key value; do
@@ -7,32 +8,43 @@ read_os() {
         case $key in ID) os_id=$value;; VERSION_ID) os_version=$value;; PRETTY_NAME) os_name=$value;; esac
     done < /etc/os-release
 }
+# Match the requested version's block, for either an installed or candidate version.
+# Repository URLs are consumed locally and never printed.
+policy_origin() {
+    local policy=$1 version=$2
+    origin=unknown
+    if awk -v ver="$version" '
+        $1=="***" {selected=($2==ver); next}
+        NF==2 && $2 ~ /^[0-9]+$/ {selected=($1==ver); next}
+        selected && /https?:\/\/([a-z][a-z]\.)?(archive\.ubuntu\.com|security\.ubuntu\.com|ports\.ubuntu\.com)\// {found=1}
+        END {exit !found}' <<< "$policy"; then origin=Ubuntu
+    elif [[ $version == *+deb.sury.org+* ]] && awk -v ver="$version" '
+        $1=="***" {selected=($2==ver); next}
+        NF==2 && $2 ~ /^[0-9]+$/ {selected=($1==ver); next}
+        selected && /https?:\/\/ppa\.launchpad(content)?\.net\/ondrej\/php\// {found=1}
+        END {exit !found}' <<< "$policy"; then origin=Ondrej-PPA
+    fi
+}
 detect() {
-    read_os
+    read_os || { unknown 'Ubuntu OS information unavailable.'; return; }
     arch=$(dpkg --print-architecture 2>/dev/null) || arch=unknown
-    case $os_id:$os_version:$arch in ubuntu:22.04:amd64|ubuntu:22.04:arm64|ubuntu:24.04:amd64|ubuntu:24.04:arm64|ubuntu:26.04:amd64|ubuntu:26.04:arm64) :;; *) unknown 'Unsupported OS or architecture.';; esac
-    local inventory p v state policy kind
-    inventory=$(dpkg-query -W '-f=${binary:Package}\t${Version}\t${db:Status-Status}\n' 2>/dev/null) || { error 'Cannot enumerate packages.'; return; }
-    while IFS=$'\t' read -r p v state; do
-        [[ $state == installed ]] || continue
+    case $os_id:$os_version:$arch in
+        ubuntu:22.04:amd64|ubuntu:22.04:arm64|ubuntu:24.04:amd64|ubuntu:24.04:arm64|ubuntu:26.04:amd64|ubuntu:26.04:arm64) supported=1;;
+        *) unknown 'Unsupported OS/architecture. Automatic repair is disabled.';;
+    esac
+    local p v state source policy kind
+    inventory=$(dpkg-query -W '-f=${binary:Package}\t${Version}\t${db:Status-Status}\t${source:Package}\n' 2>/dev/null) || { error 'Cannot read the installed package database.'; return; }
+    while IFS=$'\t' read -r p v state source; do
         p=${p%%:*}
         [[ $p =~ ^(php[0-9]+\.[0-9]+(-[a-z0-9-]+)?|libapache2-mod-php[0-9]+\.[0-9]+)$ ]] || continue
+        if [[ $state != installed ]]; then
+            case $state in config-files|not-installed) :;; *) unknown "$p: incomplete package state; repair dpkg manually first.";; esac
+            continue
+        fi
         case $p in *-cli) kind=CLI;; *-fpm) kind=FPM;; *-cgi) kind=CGI;; libapache2-mod-*) kind=mod_php;; *) continue;; esac
         policy=$(apt-cache policy "$p" 2>/dev/null) || policy=''
-        # Attribute only the installed version's version-table block. Never expose repository URLs.
-        local origin=unknown
-        if printf '%s\n' "$policy" | awk -v ver="$v" '
-            $1=="***" {inblock=($2==ver); next}
-            NF==2 && $1 ~ /^[0-9]/ && $2 ~ /^[0-9]+$/ {inblock=0}
-            inblock && /https?:\/\/([a-z][a-z]\.)?(archive\.ubuntu\.com|security\.ubuntu\.com|ports\.ubuntu\.com)\// {found=1}
-            END {exit !found}'; then origin=Ubuntu
-        elif [[ $v == *+deb.sury.org+* ]] && printf '%s\n' "$policy" | awk -v ver="$v" '
-            $1=="***" {b=($2==ver); next}
-            NF==2 && $1 ~ /^[0-9]/ && $2 ~ /^[0-9]+$/ {b=0}
-            b && /https?:\/\/ppa\.launchpad(content)?\.net\/ondrej\/php\// {ok=1}
-            END {exit !ok}'; then origin=Ondrej-PPA
-        fi
+        policy_origin "$policy" "$v"
         runtimes+=("$p|$v|$kind"); origins+=("$origin")
     done <<< "$inventory"
-    if ((${#runtimes[@]}==0)); then unknown 'No packaged PHP runtime found.'; fi
+    ((${#runtimes[@]})) || unknown 'No packaged PHP runtime found. Install a supported Ubuntu PHP runtime or inspect your custom/container deployment.'
 }

@@ -3,7 +3,7 @@ set -euo pipefail
 BASE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=../lib/common.sh
 source "$BASE/lib/common.sh"
-for module in detect advisories audit report; do
+for module in detect advisories audit report services update; do
     # shellcheck source=/dev/null
     source "$BASE/lib/$module.sh"
 done
@@ -11,20 +11,126 @@ TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 count=0
 assert() { "$@" || { printf 'FAIL: %s\n' "$*" >&2; exit 1; }; }
 ok() { count=$((count+1)); printf 'ok %d - %s\n' "$count" "$1"; }
-# Real Debian comparisons on Linux; limited fixture comparator on macOS.
-if ! command -v dpkg >/dev/null; then
-    dpkg() {
-        if [[ $1 == --print-architecture ]]; then printf 'amd64\n'; return; fi
-        [[ $1 == --compare-versions ]] || return 1
-        [[ $(printf '%s\n%s\n' "$2" "$4" | sort -V | tail -1) == "$2" ]]
-    }
-fi
+REAL_DPKG=$(command -v dpkg || true)
+# shellcheck disable=SC2329
+dpkg() {
+    case $1 in
+        --print-architecture) printf 'amd64\n';;
+        --audit) printf '%s' "${MOCK_PENDING:-}";;
+        --compare-versions)
+            if [[ -n $REAL_DPKG ]]; then "$REAL_DPKG" "$@"
+            else
+                # Fixture fallback on macOS; Linux CI uses real Debian semantics.
+                local greatest
+                greatest=$(printf '%s\n%s\n' "$2" "$4" | sort -V | tail -1)
+                [[ $greatest == "$2" ]] && { [[ $3 == ge ]] || [[ $3 == gt && $2 != "$4" ]]; }
+            fi;;
+        *) return 1;;
+    esac
+}
+# shellcheck disable=SC2329
+read_os() { os_id=${MOCK_OS:-ubuntu}; os_version=24.04; os_name='Ubuntu 24.04.5 LTS'; }
+# shellcheck disable=SC2329
+dpkg-query() {
+    [[ $1 == -W ]] || return 1
+    [[ ${MOCK_QUERY_FAIL:-0} == 0 ]] || return 1
+    [[ ${MOCK_EMPTY:-0} == 0 ]] || return 0
+    local installed
+    installed=$(cat "$TMP/version")
+    printf 'php%s-cli\t%s\tinstalled\tphp%s\n' "$MOCK_BRANCH" "$installed" "$MOCK_BRANCH"
+    printf 'php%s-fpm\t%s\tinstalled\tphp%s\n' "$MOCK_BRANCH" "$installed" "$MOCK_BRANCH"
+    printf 'php%s-common\t%s\tinstalled\tphp%s\n' "$MOCK_BRANCH" "$installed" "$MOCK_BRANCH"
+    if [[ $MOCK_MODPHP == 1 ]]; then printf 'libapache2-mod-php%s\t%s\tinstalled\tphp%s\n' "$MOCK_BRANCH" "$installed" "$MOCK_BRANCH"; fi
+    # A third-party extension must not enter the core PHP repair scope.
+    printf 'php%s-redis\t6.0.0\tinstalled\tphp-redis\n' "$MOCK_BRANCH"
+}
+# shellcheck disable=SC2329
+apt-cache() {
+    local installed
+    installed=$(cat "$TMP/version")
+    printf ' Installed: %s\n Candidate: %s\n Version table:\n' "$installed" "$MOCK_CANDIDATE"
+    if [[ $installed != "$MOCK_CANDIDATE" && $MOCK_CANDIDATE != '(none)' ]]; then
+        printf '  %s 500\n    500 %s noble/main amd64 Packages\n' "$MOCK_CANDIDATE" "${MOCK_NEW_REPO:-$MOCK_REPO}"
+    fi
+    printf ' *** %s 100\n' "$installed"
+    if [[ $MOCK_OLD_ORIGIN == 1 || $installed == "$MOCK_CANDIDATE" ]]; then
+        printf '    500 %s noble/main amd64 Packages\n' "$MOCK_REPO"
+    fi
+    printf '    100 /var/lib/dpkg/status\n'
+}
+# shellcheck disable=SC2329
+apt-mark() { printf '%s' "$MOCK_HOLD"; }
+# shellcheck disable=SC2329
+apt-get() {
+    [[ $1 == -s ]] || { printf 'FORBIDDEN direct APT call\n' >> "$TMP/calls"; return 1; }
+    local arg p old
+    old=$(cat "$TMP/version")
+    for arg in "$@"; do
+        [[ $arg == php*'='* || $arg == libapache2-mod-php*'='* ]] || continue
+        p=${arg%%=*}
+        printf 'Inst %s [%s] (%s mock [amd64])\nConf %s (%s mock [amd64])\n' "$p" "$old" "${arg#*=}" "$p" "${arg#*=}"
+    done
+    printf '%s\n' "$MOCK_UNSAFE"
+}
+# shellcheck disable=SC2329
+systemctl() {
+    local service=${2:-} generation
+    case $1 in
+        is-active) [[ $MOCK_ACTIVE == 1 ]];;
+        show)
+            if [[ $* == *--property=ActiveState* ]]; then
+                printf '%s\n' "${MOCK_STATE:-active}"
+            elif [[ $* == *LoadState* ]]; then
+                printf 'LoadState=loaded\nActiveState=%s\n' "${MOCK_STATE:-active}"
+            else
+                generation=$(cat "$TMP/generation")
+                printf 'MainPID=%s\nExecMainStartTimestampMonotonic=%s\n' "$((100+generation))" "$((1000000+generation*1000000))"
+            fi;;
+        *) printf 'FORBIDDEN direct service mutation: %s\n' "$service" >> "$TMP/calls"; return 1;;
+    esac
+}
+# Every privileged entry point is mocked. Never execute the root transaction in development.
+# shellcheck disable=SC2329
+authorize_root() { printf 'authorize\n' >> "$TMP/calls"; [[ $MOCK_AUTH_FAIL == 0 ]]; }
+# shellcheck disable=SC2329
+run_root() {
+    local generation
+    printf '%s\n' "$*" >> "$TMP/calls"
+    case $1 in
+        apt-get) [[ $MOCK_STATE_CHANGE == 0 ]] || MOCK_STATE=inactive; [[ $MOCK_REFRESH_FAIL == 0 ]];;
+        bash)
+            if [[ $MOCK_PARTIAL == 1 || $MOCK_INSTALL_FAIL == 0 ]]; then printf '%s\n' "$MOCK_CANDIDATE" > "$TMP/version"; fi
+            [[ $MOCK_INSTALL_FAIL == 0 ]];;
+        /usr/sbin/php-fpm*|apache2ctl) [[ $MOCK_CONFIG_FAIL == 0 ]];;
+        systemctl)
+            [[ $MOCK_RESTART_FAIL == 0 ]] || return 1
+            generation=$(cat "$TMP/generation")
+            [[ $MOCK_SAME_PID == 1 ]] || printf '%s\n' "$((generation+1))" > "$TMP/generation";;
+        *) return 1;;
+    esac
+}
+# shellcheck disable=SC2329
+is_interactive() { [[ $MOCK_TTY == 1 ]]; }
+# shellcheck disable=SC2329
+transaction_policy_available() { [[ $MOCK_POLICY == 0 ]]; }
+reset() {
+    MOCK_MODPHP=0; MOCK_BRANCH=8.4; MOCK_CANDIDATE=8.4.27-1+ubuntu24.04.1+deb.sury.org+1
+    MOCK_REPO=https://ppa.launchpadcontent.net/ondrej/php/ubuntu
+    MOCK_STATE_CHANGE=0; MOCK_NEW_REPO=''; MOCK_OLD_ORIGIN=1; MOCK_HOLD=''; MOCK_UNSAFE=''; MOCK_ACTIVE=1; MOCK_STATE=active
+    MOCK_AUTH_FAIL=0; MOCK_REFRESH_FAIL=0; MOCK_INSTALL_FAIL=0; MOCK_PARTIAL=0
+    MOCK_CONFIG_FAIL=0; MOCK_RESTART_FAIL=0; MOCK_SAME_PID=0; MOCK_TTY=1; MOCK_POLICY=0
+    MOCK_OS=ubuntu; MOCK_PENDING=''; MOCK_EMPTY=0; MOCK_QUERY_FAIL=0
+    printf '8.4.26-1+ubuntu24.04.1+deb.sury.org+1\n' > "$TMP/version"
+    printf '0\n' > "$TMP/generation"; : > "$TMP/calls"
+    printf '1\n' > "$TMP/answer"
+    mode=guided; no_color=1; workflow_note=''; restart_note=''; action_error=0
+    ui_init
+}
+reset
 os_version=24.04
 for cve in CVE-2026-109618 CVE-2026-109619; do
-    assess php8.3-fpm 8.3.6-0ubuntu0.24.04.13 Ubuntu "$cve"
-    assert test "$assessment" = PASS
-    assess php8.3-fpm 8.3.6-0ubuntu0.24.04.12 Ubuntu "$cve"
-    assert test "$assessment" = FAIL
+    assess php8.3-fpm 8.3.6-0ubuntu0.24.04.13 Ubuntu "$cve"; assert test "$assessment" = PASS
+    assess php8.3-fpm 8.3.6-0ubuntu0.24.04.12 Ubuntu "$cve"; assert test "$assessment" = FAIL
 done
 ok 'verified Ubuntu backports and vulnerable revisions'
 for entry in '8.2 8.2.35' '8.3 8.3.36' '8.4 8.4.27' '8.5 8.5.12'; do
@@ -32,102 +138,144 @@ for entry in '8.2 8.2.35' '8.3 8.3.36' '8.4 8.4.27' '8.5 8.5.12'; do
     assess "php$branch-cli" "1:$version-1+deb.sury.org+1" Ondrej-PPA CVE-2026-109618
     assert test "$assessment" = PASS
 done
-ok 'supported upstream baselines and PPA epochs'
-assess php8.4-fpm 8.4.26-1+deb.sury.org+1 Ondrej-PPA CVE-2026-109618
+assess php8.4-cli 8.5.12-1+deb.sury.org+1 Ondrej-PPA CVE-2026-109618
 assert test "$assessment" = UNKNOWN
-assess php8.4-fpm 8.4.27 unknown CVE-2026-109618
-assert test "$assessment" = UNKNOWN
-assess php8.1-cli 8.1.34 unknown CVE-2026-109618
-assert test "$assessment" = UNKNOWN
-ok 'unknown origins, backports and unsupported versions cannot pass'
-assess php8.3-cli 9:8.3.6-0ubuntu0.24.04.13 Ubuntu CVE-2026-109618
-assert test "$assessment" = UNKNOWN
-ok 'foreign vendor epoch cannot pass a mapping'
-# Read-only detection fixtures. Any old service/remediation probe fails this suite.
-read_os() { os_id=ubuntu; os_version=24.04; os_name='Ubuntu 24.04.5 LTS'; }
-# shellcheck disable=SC2329
-dpkg-query() { [[ $1 == -W ]] || return 1; printf '%s\n' "$INVENTORY"; }
-# shellcheck disable=SC2329
-apt-cache() {
-    printf '%s\n' ' Version table:' " *** $FIXTURE_VERSION 500" "   500 $FIXTURE_REPO noble/main amd64 Packages" '   100 /var/lib/dpkg/status'
-}
-# shellcheck disable=SC2329
-systemctl() { : > "$TMP/forbidden"; return 1; }
-# shellcheck disable=SC2329
-apt-get() { : > "$TMP/forbidden"; return 1; }
-# shellcheck disable=SC2329
-apache2ctl() { : > "$TMP/forbidden"; return 1; }
-reset() { warnings=(); runtimes=(); results=(); origins=(); overall=PASS; operation_error=0; }
-FIXTURE_VERSION=8.4.27-1+ubuntu24.04.1+deb.sury.org+1
-FIXTURE_REPO=https://ppa.launchpadcontent.net/ondrej/php/ubuntu
-INVENTORY=$'php8.4-cli\t'"$FIXTURE_VERSION"$'\tinstalled\nphp8.4-fpm\t'"$FIXTURE_VERSION"$'\tinstalled'
-reset; detect; audit
+ok 'upstream baselines, epochs and branch mismatch guard'
+workflow < "$TMP/answer" > "$TMP/output"
 assert test "$overall" = PASS
-assert test "${#warnings[@]}" = 0
-assert test "${#runtimes[@]}" = 2
-assert test ! -e "$TMP/forbidden"
-report_human > "$TMP/patched.txt"
-report_json > "$TMP/patched.json"
-assert test "$(awk '/^CVE-/ {n++} END {print n}' "$TMP/patched.txt")" = 2
-if rg 'WARNING|Services:|handler|freshness' "$TMP/patched.txt"; then exit 1; fi
-ok 'reported Laravel-host PHP 8.4.27 fixture passes with a compact warning-free report'
-FIXTURE_REPO=https://unverified.example/ubuntu
-reset; detect; audit
+assert test "$(awk '/Choice \[0\]/ {n++} END {print n+0}' "$TMP/output")" = 1
+assert test "$(awk '/^authorize$/ {n++} END {print n+0}' "$TMP/calls")" = 1
+assert test "$(awk '/systemctl restart/ {n++} END {print n+0}' "$TMP/calls")" = 1
+if grep -q 'redis\|FORBIDDEN' "$TMP/calls"; then exit 1; fi
+ok 'one confirmation refreshes, patches only core PHP, restarts and re-audits'
+reset; MOCK_MODPHP=1
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = PASS
+assert test "$(awk '/systemctl restart/ {n++} END {print n+0}' "$TMP/calls")" = 2
+ok 'mixed FPM/mod_php validates and restarts both managed services'
+reset; MOCK_BRANCH=8.3; MOCK_CANDIDATE=8.3.6-0ubuntu0.24.04.13
+MOCK_REPO=http://security.ubuntu.com/ubuntu
+printf '8.3.6-0ubuntu0.24.04.12\n' > "$TMP/version"
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = PASS
+ok 'verified Ubuntu vendor-backported repair works below upstream fixed version'
+reset; MOCK_CANDIDATE=8.4.26-2+ubuntu24.04.1+deb.sury.org+1
+workflow < "$TMP/answer" > "$TMP/output"
 assert test "$overall" = UNKNOWN
-assert test "${#warnings[@]}" = 2
-warn "${warnings[0]}"
-assert test "${#warnings[@]}" = 2
-ok 'unknown mapping notes are deduplicated per package, not repeated per CVE'
-# An archive for another version must not authenticate the installed version.
-# shellcheck disable=SC2329
-apt-cache() {
-    printf '%s\n' " *** $FIXTURE_VERSION 100" '  100 /var/lib/dpkg/status' ' 8.4.26-1 500' \
-        '  500 https://ppa.launchpadcontent.net/ondrej/php/ubuntu noble/main amd64 Packages'
-}
-reset; detect; audit
-assert test "${origins[0]}" = unknown
-assert test "$overall" = UNKNOWN
-ok 'provenance stays within the installed version block'
-INVENTORY=''; reset; detect; audit
-assert test "$overall" = UNKNOWN
-advisory_status CVE-2026-109618
-assert test "$advisory_result" = UNKNOWN
-ok 'no packaged PHP is UNKNOWN'
-reset
-runtimes=('php8.3-cli|8.3.6-0ubuntu0.24.04.12|CLI' 'php8.4-fpm|8.4.27|FPM'); origins=(Ubuntu unknown)
-audit
-advisory_status CVE-2026-109618
-assert test "$overall" = FAIL
-assert test "$advisory_result" = FAIL
-ok 'known vulnerable package takes precedence over unknown package'
-if command -v ruby >/dev/null; then
-    ruby -rjson -e 'r=JSON.parse(File.read(ARGV[0])); abort unless r["overall"]=="PASS" && r["warnings"].empty? && r["cves"].length==4; abort if r.key?("services"); abort unless r["scope"].include?("not checked")' "$TMP/patched.json"
-fi
-ok 'JSON preserves per-package evidence and explicit package-only scope'
-json_string $'quote" slash\\ tab\t newline\n\001' > "$TMP/escape.json"
-if command -v ruby >/dev/null; then ruby -rjson -e 'JSON.parse(File.read(ARGV[0]))' "$TMP/escape.json"; fi
-ok 'JSON escaping'
-for option in --fix --restart --yes --invalid --output; do
-    set +e
-    bash "$BASE/bin/php-security-check" "$option" > /dev/null 2>&1
-    status=$?
-    set -e
-    assert test "$status" = 3
+if grep -q '/transaction.sh' "$TMP/calls"; then exit 1; fi
+ok 'a newer candidate below the verified baseline is not called a fix'
+reset; printf '%s\n' "$MOCK_CANDIDATE" > "$TMP/version"
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = PASS; assert test ! -s "$TMP/calls"
+ok 'already patched systems need no root, refresh or restart'
+for answer in 0 no ''; do
+    reset; printf '%s\n' "$answer" > "$TMP/answer"
+    workflow < "$TMP/answer" > "$TMP/output"
+    assert test "$overall" = UNKNOWN; assert test ! -s "$TMP/calls"
 done
-ok 'modification and invalid options are rejected'
-set +e
-bash "$BASE/bin/php-security-check" --json --output "$TMP/cli.json"
-status=$?
-set -e
-if command -v ruby >/dev/null; then
-    ruby -rjson -e 'r=JSON.parse(File.read(ARGV[0])); abort unless {"PASS"=>0,"FAIL"=>1,"UNKNOWN"=>2,"ERROR"=>3}[r["overall"]]==ARGV[1].to_i' "$TMP/cli.json" "$status"
-fi
-set +e
-bash "$BASE/bin/php-security-check" --output "$TMP/cli.json" > /dev/null 2>&1
-status=$?
-set -e
-assert test "$status" = 3
-ok 'entry-point JSON/exit agreement and no-clobber output'
-printf '%d checks passed\n' "$count"
-printf '\nPatched-host fixture report (not a live server audit):\n'
-cat "$TMP/patched.txt"
+reset; : > "$TMP/answer"
+workflow < "$TMP/answer" > "$TMP/output"
+assert test ! -s "$TMP/calls"
+ok '0, no, blank and EOF decline without changes'
+reset; printf 'bad\n1\n' > "$TMP/answer"
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = PASS
+ok 'invalid menu input can be corrected to 1'
+reset; MOCK_TTY=0
+workflow < "$TMP/answer" > "$TMP/output"
+assert test ! -s "$TMP/calls"
+ok 'piped/noninteractive input cannot authorize mutation'
+reset; mode=check
+workflow > "$TMP/output"
+assert test ! -s "$TMP/calls"
+ok '--check remains read-only'
+reset; MOCK_BRANCH=7.4; MOCK_CANDIDATE=7.4.99-1+deb.sury.org+1
+printf '7.4.33-1+deb.sury.org+1\n' > "$TMP/version"
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = UNKNOWN; assert test ! -s "$TMP/calls"
+ok 'unsupported/EOL branch without verified backport requires manual migration'
+reset; MOCK_OS=debian
+workflow < "$TMP/answer" > "$TMP/output"
+assert test ! -s "$TMP/calls"
+ok 'unsupported platform never triggers repair'
+reset; MOCK_CANDIDATE='(none)'
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = UNKNOWN
+if grep -q '/transaction.sh' "$TMP/calls"; then exit 1; fi
+ok 'no fixed candidate produces an actionable result without installation'
+reset; MOCK_OLD_ORIGIN=0
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = PASS
+ok 'an unindexed installed version can be replaced by a verified fixed candidate'
+reset; MOCK_REPO=https://unverified.example/ubuntu
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = UNKNOWN
+if grep -q '/transaction.sh' "$TMP/calls"; then exit 1; fi
+ok 'unverified candidate provenance blocks installation'
+reset; MOCK_REPO=http://security.ubuntu.com/ubuntu
+MOCK_NEW_REPO=https://ppa.launchpadcontent.net/ondrej/php/ubuntu
+workflow < "$TMP/answer" > "$TMP/output"
+if grep -q '/transaction.sh' "$TMP/calls"; then exit 1; fi
+ok 'a known installed vendor cannot silently switch to the PPA'
+reset; MOCK_STATE_CHANGE=1
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = ERROR
+if grep -q '/transaction.sh' "$TMP/calls"; then exit 1; fi
+ok 'service state changes outside the approved scope block installation'
+reset; MOCK_HOLD=php8.4-common
+workflow < "$TMP/answer" > "$TMP/output"
+assert test ! -s "$TMP/calls"
+ok 'held PHP package blocks repair without removing holds'
+for unsafe in 'Remv php8.4-cli [8.4.26]' 'Inst unrelated [1] (2 mock)' 'Inst php8.5-cli (8.5.12 mock)' 'Conf unrelated (1 mock)'; do
+    reset; MOCK_UNSAFE=$unsafe
+    workflow < "$TMP/answer" > "$TMP/output"
+    if grep -q '/transaction.sh' "$TMP/calls"; then exit 1; fi
+done
+ok 'APT removal, new branch, new dependency and unrelated configuration are refused'
+for failure in MOCK_AUTH_FAIL MOCK_REFRESH_FAIL MOCK_INSTALL_FAIL MOCK_CONFIG_FAIL MOCK_RESTART_FAIL MOCK_SAME_PID; do
+    reset; printf -v "$failure" '%s' 1
+    workflow < "$TMP/answer" > "$TMP/output"
+    assert test "$overall" = ERROR
+done
+ok 'authorization, APT, validation and restart failures cannot yield green PASS'
+reset; MOCK_INSTALL_FAIL=1; MOCK_PARTIAL=1
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = ERROR
+if grep -q 'systemctl restart' "$TMP/calls"; then exit 1; fi
+ok 'partially successful package update is re-audited but remains ERROR'
+reset; MOCK_POLICY=1
+workflow < "$TMP/answer" > "$TMP/output"
+assert test ! -s "$TMP/calls"
+ok 'existing administrator restart policy is preserved'
+reset; MOCK_STATE=inactive; MOCK_ACTIVE=0
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = PASS
+if grep -q 'systemctl restart' "$TMP/calls"; then exit 1; fi
+ok 'inactive services are never started or restarted'
+reset; MOCK_PENDING='incomplete package'
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = ERROR
+if grep -q '/transaction.sh' "$TMP/calls"; then exit 1; fi
+ok 'incomplete dpkg transactions block installation'
+reset; MOCK_EMPTY=1
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = UNKNOWN; assert test ! -s "$TMP/calls"
+reset; MOCK_QUERY_FAIL=1
+workflow < "$TMP/answer" > "$TMP/output"
+assert test "$overall" = ERROR; assert test ! -s "$TMP/calls"
+ok 'missing PHP and failed inventory never report PASS'
+for option in --json --output --yes --invalid; do
+    set +e
+    bash "$BASE/bin/php-security-check" "$option" >/dev/null 2>&1
+    code=$?
+    set -e
+    assert test "$code" = 3
+done
+ok 'JSON/export and unconfirmed noninteractive fix options are removed'
+reset; mode=check
+workflow > "$TMP/sample"
+if grep -q $'\033' "$TMP/sample"; then exit 1; fi
+ok 'plain terminal report contains no ANSI escapes when color is disabled'
+printf '\n%d checks passed; all privileged operations were mocked.\n' "$count"
+printf '\nSample patched-host report (fixture):\n'
+reset; printf '%s\n' "$MOCK_CANDIDATE" > "$TMP/version"; snapshot; report_human

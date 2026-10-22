@@ -7,34 +7,29 @@ export LC_ALL=C
 BASE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=../lib/common.sh
 source "$BASE/lib/common.sh"
-for module in detect advisories audit report; do
+for module in detect advisories audit report services update; do
     # shellcheck source=/dev/null
     source "$BASE/lib/$module.sh"
 done
-json=0; output=''
+mode=guided; no_color=0; chosen=0
 usage() {
-    printf '%s\n' 'Usage: php-security-check [--check] [--json] [--output PATH] [--no-color]' \
-        'Read-only PHP package check for CVE-2026-109618 and CVE-2026-109619.' \
-        'Exit: 0 PASS, 1 FAIL, 2 UNKNOWN, 3 ERROR. No updates or restarts.'
+    printf '%s\n' 'Usage: bash bin/php-security-check' \
+        'Check PHP, review a repair scope, confirm with 1/0, then patch and check again.' \
+        'Optional: --check (read-only), --fix (guided repair), --no-color, --help, --version.' \
+        'Exit: 0 package PASS, 1 FAIL, 2 UNKNOWN, 3 ERROR. No JSON/export modes.'
 }
 while (($#)); do
     case $1 in
-        --check|--no-color) :;; --json) json=1;;
-        --output) shift; (($#)) && [[ -n $1 && $1 != --* ]] || { usage >&2; exit 3; }; output=$1;;
+        --check|--fix)
+            ((chosen==0)) || { usage >&2; exit 3; }; chosen=1
+            if [[ $1 == --check ]]; then mode=check; else mode=guided; fi;;
+        --no-color) no_color=1;;
         --help) usage; exit 0;; --version) printf '%s\n' "$VERSION"; exit 0;;
-        *) printf 'Unsupported option: %s. This version is read-only.\n' "$1" >&2; usage >&2; exit 3;;
+        *) printf 'Unsupported option: %s\n' "$1" >&2; usage >&2; exit 3;;
     esac
     shift
 done
-if [[ ! -r /etc/os-release ]] || ! command -v dpkg-query >/dev/null || ! command -v dpkg >/dev/null; then
-    os_name=unknown; arch=unknown; unknown 'Ubuntu package database unavailable.'
-else
-    detect
-    ((operation_error)) || audit
-fi
-((operation_error==0)) || overall=ERROR
-render() { if ((json)); then report_json; else report_human; fi; }
-if [[ -n $output ]]; then
-    if ! (umask 077; set -o noclobber; render > "$output"); then printf 'Cannot create report output.\n' >&2; exit 3; fi
-else render; fi
-case $overall in PASS) exit 0;; FAIL) exit 1;; UNKNOWN) exit 2;; *) exit 3;; esac
+ui_init
+workflow
+status_code
+exit $?

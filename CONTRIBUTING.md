@@ -1,21 +1,21 @@
 # Contributing
 
-Use Bash 4.4+ and standard Ubuntu utilities. Keep checks read-only and secrets
-out of logs. Never execute real upgrades/restarts in development tests.
-Mock package queries and ensure service/package modification commands are never
-called. Add regressions
-for safety bugs, unknown evidence and JSON/exit codes.
+Use Bash 4.4+ and standard Ubuntu utilities. Keep the public workflow centered on
+one guided check/confirm/fix/recheck command. Preserve explicit terminal consent,
+narrow PHP source-package scope and conservative evidence handling. Do not add
+unrelated checks, web-handler interpreters, JSON/export modes or warning spam.
 
-Run `bash -n` on every shell file, `shellcheck -x` on the entry point/modules/tests,
-and `bash tests/run.sh`. CI uses Ruby to parse JSON; production does not.
-Cross-module globals are documented by the module layout and excluded from
-ShellCheck unused/undefined-global diagnostics in .shellcheckrc; other lint rules
-remain enabled.
+Never run real APT refresh/upgrades or service restarts during development tests.
+Mock run_root, authorization and package/systemd probes. Do not execute the private
+root transaction against a real development host. Test cancellations, failures,
+partial updates, missing patches and unsafe resolver plans.
 
-Advisory changes require authoritative source URLs, a verification date, exact
-package applicability and tests. Never infer vendor vulnerability from an
-upstream version alone. Keep this tool read-only and scoped to the two PHP CVEs.
-Do not add service inspection, automatic remediation or unrelated security checks.
+Run Bash syntax checks for every script, ShellCheck and `bash tests/run.sh` as
+shown in README.md. Linux tests use real dpkg version comparisons; macOS uses a
+limited fixture fallback. Cross-module unused/undefined-global lint diagnostics
+are excluded in .shellcheckrc; other lint checks remain enabled.
 
-Open a pull request describing the problem, resulting behavior, tests and known
-limitations. Do not publish releases or run production actions as part of tests.
+Advisory changes need authoritative sources, exact package/release applicability,
+verification dates and tests. Never infer a vendor vulnerability from an upstream
+number alone. Privileged transaction changes require careful review and disposable
+Ubuntu VM validation before production release. Do not publish automatically.
